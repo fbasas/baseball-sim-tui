@@ -285,3 +285,62 @@ class Team:
             if player.player_id == player_id:
                 return player
         return None
+
+
+def create_lineup(
+    team: Team,
+    batting_order: List[str],
+    positions: Dict[str, Union[Position, type]],
+    starting_pitcher_id: str,
+) -> Lineup:
+    """Create validated lineup from team roster.
+
+    Validates that all players exist in the team roster with the required
+    statistics, and that positions are properly assigned.
+
+    Args:
+        team: Team with loaded roster and stats.
+        batting_order: List of 9 player IDs in batting order (index 0 = leadoff).
+        positions: Dict mapping player_id to defensive position (Position or DesignatedHitter).
+        starting_pitcher_id: Player ID of starting pitcher.
+
+    Returns:
+        Validated Lineup ready for game.
+
+    Raises:
+        ValueError: If player not in roster, missing stats, or invalid positions.
+
+    Example:
+        >>> positions = {'p1': Position.CENTER_FIELD, 'p2': Position.SHORTSTOP, ...}
+        >>> lineup = create_lineup(team, ['p1', 'p2', ...], positions, 'pitcher1')
+    """
+    if len(batting_order) != 9:
+        raise ValueError(
+            f"Batting order must have exactly 9 players, got {len(batting_order)}"
+        )
+
+    slots = []
+    for player_id in batting_order:
+        if player_id not in team.batting_stats:
+            raise ValueError(
+                f"Player {player_id} has no batting stats for this team/year"
+            )
+
+        position = positions.get(player_id)
+        if position is None:
+            raise ValueError(f"No position assigned for {player_id}")
+
+        slots.append(
+            LineupSlot(
+                player_id=player_id,
+                position=position,
+                batting_stats=team.batting_stats[player_id],
+            )
+        )
+
+    if starting_pitcher_id not in team.pitching_stats:
+        raise ValueError(
+            f"Pitcher {starting_pitcher_id} has no pitching stats for this team/year"
+        )
+
+    return Lineup(slots=slots, starting_pitcher_id=starting_pitcher_id)

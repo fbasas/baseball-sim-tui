@@ -11,7 +11,7 @@ This module provides game-level data structures and orchestration:
 from src.game.engine import GameEngine
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
-from src.game.team import Lineup, LineupSlot, Team
+from src.game.team import Lineup, LineupSlot, Team, create_lineup
 
 __all__ = [
     'Position',
@@ -19,6 +19,7 @@ __all__ = [
     'LineupSlot',
     'Lineup',
     'Team',
+    'create_lineup',
     'InningHalf',
     'GameState',
     'GameEngine',
