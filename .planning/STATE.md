@@ -10,27 +10,27 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 1 of 5 (Data Foundation & Simulation Core)
-Plan: 2 of TBD in current phase
+Plan: 3 of TBD in current phase
 Status: In progress
-Last activity: 2026-01-29 - Completed 01-02-PLAN.md (Odds-Ratio Method)
+Last activity: 2026-01-29 - Completed 01-03-PLAN.md (At-Bat Outcome Resolution)
 
-Progress: [██░░░░░░░░] 20%
+Progress: [███░░░░░░░] 30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 3.5 min
-- Total execution time: 0.12 hours
+- Total plans completed: 3
+- Average duration: 3.7 min
+- Total execution time: 0.18 hours
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01    | 2     | 7 min | 3.5 min  |
+| Phase | Plans | Total  | Avg/Plan |
+|-------|-------|--------|----------|
+| 01    | 3     | 11 min | 3.7 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3 min), 01-02 (4 min)
+- Last 5 plans: 01-01 (3 min), 01-02 (4 min), 01-03 (4 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -52,6 +52,9 @@ Recent decisions affecting current work:
 - Odds-ratio over naive averaging: Formula properly weights abilities vs league context (01-02)
 - Three eras: deadball (<1920), liveball (1920-1960), modern (1961+) per sabermetric standards (01-02)
 - League prob validation: Strictly between 0 and 1 to avoid division issues (01-02)
+- Chained binomial for outcome resolution: Converts marginal to conditional probabilities (01-03)
+- 70/30 strikeout swinging/looking split: League average baseline (01-03)
+- Out type distribution: groundout 44%, flyout 28%, lineout 21%, popup 7% (01-03)
 
 ### Pending Todos
 
@@ -63,6 +66,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (01-02 execution)
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-01-29 (01-03 execution)
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
