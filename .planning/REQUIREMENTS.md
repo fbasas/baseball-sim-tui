@@ -9,9 +9,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Data & Simulation
 
-- [ ] **DATA-01**: Load and query Sean Lahman's database (all years, all teams)
-- [ ] **DATA-02**: Implement odds-ratio method for pitcher-batter matchup calculations
-- [ ] **DATA-03**: Calculate at-bat outcomes using proper probability combination
+- [x] **DATA-01**: Load and query Sean Lahman's database (all years, all teams)
+- [x] **DATA-02**: Implement odds-ratio method for pitcher-batter matchup calculations
+- [x] **DATA-03**: Calculate at-bat outcomes using proper probability combination
 
 ### Game Flow
 
@@ -95,9 +95,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
+| DATA-03 | Phase 1 | Complete |
 | GAME-01 | Phase 2 | Pending |
 | GAME-02 | Phase 2 | Pending |
 | GAME-03 | Phase 2 | Pending |
@@ -125,4 +125,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-28*
-*Last updated: 2026-01-28 after roadmap creation*
+*Last updated: 2026-01-29 after Phase 1 completion*

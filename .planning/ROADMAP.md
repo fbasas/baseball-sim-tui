@@ -12,7 +12,7 @@ This roadmap delivers a terminal-based baseball simulation that produces realist
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Data Foundation & Simulation Core** - Load Lahman database and implement statistically accurate at-bat simulation
+- [x] **Phase 1: Data Foundation & Simulation Core** - Load Lahman database and implement statistically accurate at-bat simulation
 - [ ] **Phase 2: Game Flow & Team Management** - Orchestrate complete games with proper baseball rules and lineup management
 - [ ] **Phase 3: Minimal Playable TUI** - Create dashboard interface enabling user to play through games
 - [ ] **Phase 4: Substitutions & Advanced Mechanics** - Add managerial decisions for pitching changes and pinch hitters
@@ -32,11 +32,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Data layer: project structure, models, Lahman repository
-- [ ] 01-02-PLAN.md — Probability math: odds-ratio calculation, league averages
-- [ ] 01-03-PLAN.md — At-bat resolution: chained binomial, RNG, outcome enum
-- [ ] 01-04-PLAN.md — Runner advancement: base state, advancement matrices
-- [ ] 01-05-PLAN.md — Simulation engine: orchestration, stats calculator, validation
+- [x] 01-01-PLAN.md — Data layer: project structure, models, Lahman repository
+- [x] 01-02-PLAN.md — Probability math: odds-ratio calculation, league averages
+- [x] 01-03-PLAN.md — At-bat resolution: chained binomial, RNG, outcome enum
+- [x] 01-04-PLAN.md — Runner advancement: base state, advancement matrices
+- [x] 01-05-PLAN.md — Simulation engine: orchestration, stats calculator, validation
 
 ### Phase 2: Game Flow & Team Management
 **Goal**: User can select two historical teams and simulate a complete nine-inning game with proper baseball rules
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Foundation & Simulation Core | 0/5 | Planned | - |
+| 1. Data Foundation & Simulation Core | 5/5 | ✓ Complete | 2026-01-29 |
 | 2. Game Flow & Team Management | 0/TBD | Not started | - |
 | 3. Minimal Playable TUI | 0/TBD | Not started | - |
 | 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
