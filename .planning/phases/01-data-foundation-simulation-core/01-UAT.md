@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 01-data-foundation-simulation-core
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md]
 started: 2026-01-28T23:00:00Z
@@ -53,7 +53,13 @@ skipped: 0
   reason: "User reported: Can't test - no database. Downloaded file gave 'file is not a database' error. Want to add scope to build the SQLite database ourselves using the latest Lahman data."
   severity: major
   test: 1
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Project relies on third-party pre-built SQLite (jknecht/baseball-archive-sqlite) which is outdated (2022 data) and download unreliable. Original Chadwick Bureau CSV source returns 404. SABR is now the authoritative source with 1871-2025 data."
+  artifacts:
+    - path: "data/.gitkeep"
+      issue: "Contains outdated download instructions pointing to third-party SQLite"
+    - path: "src/data/lahman.py"
+      issue: "Expects SQLite at data/lahman.sqlite but no build script exists"
+  missing:
+    - "scripts/build_lahman_db.py - Download SABR CSVs and convert to SQLite"
+    - "Update data/.gitkeep with SABR download URL and build instructions"
+  debug_session: ".planning/debug/lahman-sqlite-build.md"
