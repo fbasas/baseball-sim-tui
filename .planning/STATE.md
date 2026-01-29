@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 3 of 5 (Minimal Playable TUI)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-01-29 - Completed 03-01-PLAN.md (TUI App Shell)
+Last activity: 2026-01-29 - Completed 03-02-PLAN.md (Core Display Widgets)
 
-Progress: [████████░░] 80% (11 of 14 plans)
+Progress: [████████░░] 86% (12 of 14 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
-- Average duration: 4.7 min
+- Total plans completed: 12
+- Average duration: 4.6 min
 - Total execution time: 0.9 hours
 
 **By Phase:**
@@ -29,10 +29,10 @@ Progress: [████████░░] 80% (11 of 14 plans)
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
-| 03    | 1     | 2 min  | 2.0 min  |
+| 03    | 2     | 4 min  | 2.0 min  |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (2 min), 02-02 (2 min), 02-03 (4 min), 02-04 (3 min), 03-01 (2 min)
+- Last 5 plans: 02-02 (2 min), 02-03 (4 min), 02-04 (3 min), 03-01 (2 min), 03-02 (2 min)
 - Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
@@ -76,6 +76,9 @@ Recent decisions affecting current work:
 - BaseState cleared on every transition: Fresh bases each half-inning (02-04)
 - textual>=0.85.0 version spec: Compatible with 7.x while allowing minor updates (03-01)
 - CSS_PATH relative to app.py: Textual convention for style loading (03-01)
+- update_from_state pattern: widgets receive data via method, not reactive binding (03-02)
+- Rich markup for styling: [bold], [bold reverse] for current batter (03-02)
+- CSS class flash for score changes: 500ms timer with add_class/remove_class (03-02)
 
 ### Pending Todos
 
@@ -87,6 +90,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (03-01 execution)
-Stopped at: Completed 03-01-PLAN.md (TUI App Shell)
+Last session: 2026-01-29 (03-02 execution)
+Stopped at: Completed 03-02-PLAN.md (Core Display Widgets)
 Resume file: None
