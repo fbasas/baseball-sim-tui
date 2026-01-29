@@ -95,34 +95,34 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | TBD | Pending |
-| DATA-02 | TBD | Pending |
-| DATA-03 | TBD | Pending |
-| GAME-01 | TBD | Pending |
-| GAME-02 | TBD | Pending |
-| GAME-03 | TBD | Pending |
-| GAME-04 | TBD | Pending |
-| TEAM-01 | TBD | Pending |
-| TEAM-02 | TBD | Pending |
-| LINE-01 | TBD | Pending |
-| LINE-02 | TBD | Pending |
-| SUBS-01 | TBD | Pending |
-| SUBS-02 | TBD | Pending |
-| SUBS-03 | TBD | Pending |
-| TUI-01 | TBD | Pending |
-| TUI-02 | TBD | Pending |
-| TUI-03 | TBD | Pending |
-| TUI-04 | TBD | Pending |
-| TUI-05 | TBD | Pending |
-| TUI-06 | TBD | Pending |
-| NARR-01 | TBD | Pending |
-| NARR-02 | TBD | Pending |
+| DATA-01 | Phase 1 | Pending |
+| DATA-02 | Phase 1 | Pending |
+| DATA-03 | Phase 1 | Pending |
+| GAME-01 | Phase 2 | Pending |
+| GAME-02 | Phase 2 | Pending |
+| GAME-03 | Phase 2 | Pending |
+| GAME-04 | Phase 2 | Pending |
+| TEAM-01 | Phase 2 | Pending |
+| TEAM-02 | Phase 2 | Pending |
+| LINE-01 | Phase 2 | Pending |
+| LINE-02 | Phase 2 | Pending |
+| SUBS-01 | Phase 4 | Pending |
+| SUBS-02 | Phase 4 | Pending |
+| SUBS-03 | Phase 4 | Pending |
+| TUI-01 | Phase 3 | Pending |
+| TUI-02 | Phase 3 | Pending |
+| TUI-03 | Phase 3 | Pending |
+| TUI-04 | Phase 3 | Pending |
+| TUI-05 | Phase 3 | Pending |
+| TUI-06 | Phase 5 | Pending |
+| NARR-01 | Phase 5 | Pending |
+| NARR-02 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22 ⚠️
+- Mapped to phases: 22
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-01-28*
-*Last updated: 2026-01-28 after initial definition*
+*Last updated: 2026-01-28 after roadmap creation*
