@@ -10,29 +10,29 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 2 of 5 (Game Flow & Team Management)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-01-29 - Completed 02-02-PLAN.md (Team Dataclass)
+Last activity: 2026-01-29 - Completed 02-03-PLAN.md (GameEngine Half-Inning)
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 5.5 min
-- Total execution time: 0.73 hours
+- Total plans completed: 9
+- Average duration: 5.3 min
+- Total execution time: 0.8 hours
 
 **By Phase:**
 
 | Phase | Plans | Total  | Avg/Plan |
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
-| 02    | 2     | 4 min  | 2.0 min  |
+| 02    | 3     | 8 min  | 2.7 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-04 (4 min), 01-05 (7 min), 01-06 (20 min), 02-01 (2 min), 02-02 (2 min)
-- Trend: Phase 2 fast due to straightforward data structure/helper creation
+- Last 5 plans: 01-05 (7 min), 01-06 (20 min), 02-01 (2 min), 02-02 (2 min), 02-03 (4 min)
+- Trend: Phase 2 progressing efficiently
 
 *Updated after each plan completion*
 
@@ -67,6 +67,9 @@ Recent decisions affecting current work:
 - Team not frozen: lineup field set after loading for game setup workflow (02-02)
 - Load all stats on team load: avoids N+1 queries during lineup creation (02-02)
 - Filter by stats presence: get_available_batters/pitchers for lineup selection (02-02)
+- GameEngine composes SimulationEngine: Flexible injection, no inheritance coupling (02-03)
+- GIDP explicit +2 outs, capped at 3: Accurate rules, prevents invalid state (02-03)
+- Batting order advances every at-bat: Matches real baseball rules (02-03)
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (02-02 execution)
-Stopped at: Completed 02-02-PLAN.md (Team Dataclass)
+Last session: 2026-01-29 (02-03 execution)
+Stopped at: Completed 02-03-PLAN.md (GameEngine Half-Inning)
 Resume file: None
