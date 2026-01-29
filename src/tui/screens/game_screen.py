@@ -206,13 +206,19 @@ class GameScreen(Screen):
 
         # Update boxscore
         boxscore = self.query_one(BoxscoreWidget)
+        if self.away_team:
+            away_name = f"{self.away_team.info.year} {self.away_team.info.team_name}"
+        else:
+            away_name = "Away"
+        if self.home_team:
+            home_name = f"{self.home_team.info.year} {self.home_team.info.team_name}"
+        else:
+            home_name = "Home"
         boxscore.update_from_state(
-            away_name=self.away_team.info.team_name if self.away_team else "Away",
-            home_name=self.home_team.info.team_name if self.home_team else "Home",
+            away_name=away_name,
+            home_name=home_name,
             away_runs=state.away_score,
             home_runs=state.home_score,
-            away_hits=self.away_hits,
-            home_hits=self.home_hits,
         )
 
         # Update situation
