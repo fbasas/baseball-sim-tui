@@ -4,6 +4,7 @@ This module provides the GameScreen that orchestrates the game dashboard,
 loading teams, managing game state, and updating all widgets reactively.
 """
 
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
@@ -20,6 +21,9 @@ from src.game.team import Team, create_lineup
 from src.simulation.engine import AtBatResult
 
 from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget
+
+# Database path relative to this file (src/tui/screens/ -> project root -> data/)
+_DB_PATH = Path(__file__).parent.parent.parent.parent / "data" / "lahman.sqlite"
 
 
 class GameScreen(Screen):
@@ -95,7 +99,7 @@ class GameScreen(Screen):
         matchup. Creates lineups from available batters and pitchers.
         """
         try:
-            with LahmanRepository() as repo:
+            with LahmanRepository(str(_DB_PATH)) as repo:
                 # Load 1927 Yankees (away) vs 1927 Cubs (home)
                 self.away_team = Team.load_from_repository(repo, "NYA", 1927)
                 self.home_team = Team.load_from_repository(repo, "CHN", 1927)
