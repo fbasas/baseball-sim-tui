@@ -5,22 +5,22 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** The simulation produces realistic baseball outcomes based on actual historical player statistics, letting you experience "what if" scenarios across baseball history.
-**Current focus:** Phase 2 in progress - Game Flow & Team Management
+**Current focus:** Phase 2 complete - Game Flow & Team Management
 
 ## Current Position
 
 Phase: 2 of 5 (Game Flow & Team Management)
-Plan: 3 of 4 in current phase
-Status: In progress
-Last activity: 2026-01-29 - Completed 02-03-PLAN.md (GameEngine Half-Inning)
+Plan: 4 of 4 in current phase (COMPLETE)
+Status: Phase complete
+Last activity: 2026-01-29 - Completed 02-04-PLAN.md (Full Game Loop)
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100% (Phase 2)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
-- Average duration: 5.3 min
+- Total plans completed: 10
+- Average duration: 5.0 min
 - Total execution time: 0.8 hours
 
 **By Phase:**
@@ -28,11 +28,11 @@ Progress: [█████████░] 90%
 | Phase | Plans | Total  | Avg/Plan |
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
-| 02    | 3     | 8 min  | 2.7 min  |
+| 02    | 4     | 11 min | 2.8 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-05 (7 min), 01-06 (20 min), 02-01 (2 min), 02-02 (2 min), 02-03 (4 min)
-- Trend: Phase 2 progressing efficiently
+- Last 5 plans: 01-06 (20 min), 02-01 (2 min), 02-02 (2 min), 02-03 (4 min), 02-04 (3 min)
+- Trend: Phase 2 completed efficiently
 
 *Updated after each plan completion*
 
@@ -70,6 +70,9 @@ Recent decisions affecting current work:
 - GameEngine composes SimulationEngine: Flexible injection, no inheritance coupling (02-03)
 - GIDP explicit +2 outs, capped at 3: Accurate rules, prevents invalid state (02-03)
 - Batting order advances every at-bat: Matches real baseball rules (02-03)
+- Walk-off check during bottom 9+: Detect immediately, not just at inning end (02-04)
+- Batting order persists across innings: No reset on transition (02-04)
+- BaseState cleared on every transition: Fresh bases each half-inning (02-04)
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (02-03 execution)
-Stopped at: Completed 02-03-PLAN.md (GameEngine Half-Inning)
+Last session: 2026-01-29 (02-04 execution)
+Stopped at: Completed 02-04-PLAN.md (Full Game Loop) - Phase 2 complete
 Resume file: None
