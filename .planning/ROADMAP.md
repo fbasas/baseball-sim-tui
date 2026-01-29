@@ -13,7 +13,7 @@ This roadmap delivers a terminal-based baseball simulation that produces realist
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data Foundation & Simulation Core** - Load Lahman database and implement statistically accurate at-bat simulation
-- [ ] **Phase 2: Game Flow & Team Management** - Orchestrate complete games with proper baseball rules and lineup management
+- [x] **Phase 2: Game Flow & Team Management** - Orchestrate complete games with proper baseball rules and lineup management
 - [ ] **Phase 3: Minimal Playable TUI** - Create dashboard interface enabling user to play through games
 - [ ] **Phase 4: Substitutions & Advanced Mechanics** - Add managerial decisions for pitching changes and pinch hitters
 - [ ] **Phase 5: Narrative & Polish** - Generate play-by-play text and apply visual styling
@@ -52,10 +52,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Game data structures: Position enum, Lineup dataclass, GameState frozen dataclass
-- [ ] 02-02-PLAN.md — Team container: Team.load_from_repository(), create_lineup() helper
-- [ ] 02-03-PLAN.md — GameEngine with simulate_half_inning() - runs until 3 outs
-- [ ] 02-04-PLAN.md — Full game loop: transition_half_inning(), check_game_complete(), simulate_game()
+- [x] 02-01-PLAN.md — Game data structures: Position enum, Lineup dataclass, GameState frozen dataclass
+- [x] 02-02-PLAN.md — Team container: Team.load_from_repository(), create_lineup() helper
+- [x] 02-03-PLAN.md — GameEngine with simulate_half_inning() - runs until 3 outs
+- [x] 02-04-PLAN.md — Full game loop: transition_half_inning(), check_game_complete(), simulate_game()
 
 ### Phase 3: Minimal Playable TUI
 **Goal**: User interacts with game through terminal dashboard showing live game state and play history
@@ -112,7 +112,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data Foundation & Simulation Core | 6/6 | Complete | 2026-01-28 |
-| 2. Game Flow & Team Management | 0/4 | Not started | - |
+| 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
 | 3. Minimal Playable TUI | 0/TBD | Not started | - |
 | 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
 | 5. Narrative & Polish | 0/TBD | Not started | - |

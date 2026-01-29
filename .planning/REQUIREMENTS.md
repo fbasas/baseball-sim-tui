@@ -15,20 +15,20 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Game Flow
 
-- [ ] **GAME-01**: Simulate complete game with proper innings and side transitions
-- [ ] **GAME-02**: Track outs and enforce three-outs-per-half-inning rule
-- [ ] **GAME-03**: Track baserunners and advance on hits appropriately
-- [ ] **GAME-04**: Track and display score, detect game-end conditions
+- [x] **GAME-01**: Simulate complete game with proper innings and side transitions
+- [x] **GAME-02**: Track outs and enforce three-outs-per-half-inning rule
+- [x] **GAME-03**: Track baserunners and advance on hits appropriately
+- [x] **GAME-04**: Track and display score, detect game-end conditions
 
 ### Team Selection
 
-- [ ] **TEAM-01**: Select any team from any year in the Lahman database
-- [ ] **TEAM-02**: Load historical roster for selected team/year
+- [x] **TEAM-01**: Select any team from any year in the Lahman database
+- [x] **TEAM-02**: Load historical roster for selected team/year
 
 ### Lineup Management
 
-- [ ] **LINE-01**: Set starting lineup (batting order and positions) before game
-- [ ] **LINE-02**: Set starting pitcher before game
+- [x] **LINE-01**: Set starting lineup (batting order and positions) before game
+- [x] **LINE-02**: Set starting pitcher before game
 
 ### In-Game Decisions
 
@@ -98,14 +98,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Complete |
 | DATA-03 | Phase 1 | Complete |
-| GAME-01 | Phase 2 | Pending |
-| GAME-02 | Phase 2 | Pending |
-| GAME-03 | Phase 2 | Pending |
-| GAME-04 | Phase 2 | Pending |
-| TEAM-01 | Phase 2 | Pending |
-| TEAM-02 | Phase 2 | Pending |
-| LINE-01 | Phase 2 | Pending |
-| LINE-02 | Phase 2 | Pending |
+| GAME-01 | Phase 2 | Complete |
+| GAME-02 | Phase 2 | Complete |
+| GAME-03 | Phase 2 | Complete |
+| GAME-04 | Phase 2 | Complete |
+| TEAM-01 | Phase 2 | Complete |
+| TEAM-02 | Phase 2 | Complete |
+| LINE-01 | Phase 2 | Complete |
+| LINE-02 | Phase 2 | Complete |
 | SUBS-01 | Phase 4 | Pending |
 | SUBS-02 | Phase 4 | Pending |
 | SUBS-03 | Phase 4 | Pending |
@@ -125,4 +125,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-01-28*
-*Last updated: 2026-01-29 after Phase 1 completion*
+*Last updated: 2026-01-29 after Phase 2 completion*
