@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data Foundation & Simulation Core** - Load Lahman database and implement statistically accurate at-bat simulation
 - [x] **Phase 2: Game Flow & Team Management** - Orchestrate complete games with proper baseball rules and lineup management
-- [ ] **Phase 3: Minimal Playable TUI** - Create dashboard interface enabling user to play through games
+- [x] **Phase 3: Minimal Playable TUI** - Create dashboard interface enabling user to play through games
 - [ ] **Phase 4: Substitutions & Advanced Mechanics** - Add managerial decisions for pitching changes and pinch hitters
 - [ ] **Phase 5: Narrative & Polish** - Generate play-by-play text and apply visual styling
 
@@ -70,10 +70,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — TUI infrastructure: Textual dependency, app shell, CSS layout
-- [ ] 03-02-PLAN.md — Core widgets: BoxscoreWidget, SituationWidget, LineupCard
-- [ ] 03-03-PLAN.md — Game screen integration: GameScreen, PlayByPlayLog, engine wiring
-- [ ] 03-04-PLAN.md — End game and controls: fast-forward, EndGameMenu, human verification
+- [x] 03-01-PLAN.md — TUI infrastructure: Textual dependency, app shell, CSS layout
+- [x] 03-02-PLAN.md — Core widgets: BoxscoreWidget, SituationWidget, LineupCard
+- [x] 03-03-PLAN.md — Game screen integration: GameScreen, PlayByPlayLog, engine wiring
+- [x] 03-04-PLAN.md — End game and controls: fast-forward, EndGameMenu, human verification
 
 ### Phase 4: Substitutions & Advanced Mechanics
 **Goal**: User makes in-game managerial decisions for pitching changes and pinch hitters
@@ -114,6 +114,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Data Foundation & Simulation Core | 6/6 | Complete | 2026-01-28 |
 | 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
-| 3. Minimal Playable TUI | 0/4 | In Progress | - |
+| 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
 | 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
 | 5. Narrative & Polish | 0/TBD | Not started | - |

@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** The simulation produces realistic baseball outcomes based on actual historical player statistics, letting you experience "what if" scenarios across baseball history.
-**Current focus:** Phase 3 - Minimal Playable TUI
+**Current focus:** Phase 3 Complete - Ready for Phase 4
 
 ## Current Position
 
-Phase: 3 of 5 (Minimal Playable TUI)
-Plan: 3 of 4 in current phase
-Status: In progress
-Last activity: 2026-01-29 - Completed 03-03-PLAN.md (GameScreen Integration)
+Phase: 3 of 5 (Minimal Playable TUI) - COMPLETE
+Plan: 4 of 4 in current phase - COMPLETE
+Status: Phase verified
+Last activity: 2026-01-29 - Completed 03-04-PLAN.md (End game and controls)
 
-Progress: [█████████░] 93% (13 of 14 plans)
+Progress: [██████████] 100% (14 of 14 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 13
-- Average duration: 4.4 min
-- Total execution time: 1.0 hours
+- Total plans completed: 14
+- Average duration: 4.6 min
+- Total execution time: 1.1 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [█████████░] 93% (13 of 14 plans)
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
-| 03    | 3     | 7 min  | 2.3 min  |
+| 03    | 4     | 15 min | 3.8 min  |
 
 **Recent Trend:**
-- Last 5 plans: 02-03 (4 min), 02-04 (3 min), 03-01 (2 min), 03-02 (2 min), 03-03 (3 min)
+- Last 5 plans: 02-04 (3 min), 03-01 (2 min), 03-02 (2 min), 03-03 (3 min), 03-04 (8 min)
 - Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
@@ -82,6 +82,10 @@ Recent decisions affecting current work:
 - Method delegation pattern: App delegates to screen via hasattr for loose coupling (03-03)
 - Hardcoded initial matchup: 1927 Yankees vs Cubs for immediate demo (03-03)
 - Hit tracking separate from state: away_hits/home_hits in GameScreen (03-03)
+- Fast-forward at 0.05s interval: ~20 plays/second for visible but rapid simulation (03-04)
+- Year in team display: Show "1927 Yankees" for clarity (03-04)
+- Runs only in boxscore: Simplified display, hits deferred to later phase (03-04)
+- ModalScreen with callback: EndGameMenu returns button ID for handler (03-04)
 
 ### Pending Todos
 
@@ -93,6 +97,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (03-03 execution)
-Stopped at: Completed 03-03-PLAN.md (GameScreen Integration)
+Last session: 2026-01-29 (03-04 execution)
+Stopped at: Completed Phase 3 - Minimal Playable TUI
 Resume file: None
