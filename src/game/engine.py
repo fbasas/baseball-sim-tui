@@ -16,10 +16,83 @@ from typing import List, Optional, Tuple
 from src.data.lahman import LahmanRepository
 from src.data.models import PitchingStats
 from src.simulation.engine import AtBatResult, SimulationEngine
+from src.simulation.game_state import BaseState
 from src.simulation.outcomes import AtBatOutcome
 
 from .state import GameState, InningHalf
 from .team import Lineup
+
+
+def transition_half_inning(state: GameState) -> GameState:
+    """Transition from completed half-inning to next.
+
+    After TOP of inning: switch to BOTTOM of same inning.
+    After BOTTOM of inning: switch to TOP of next inning.
+
+    IMPORTANT: Always clears base_state and resets outs to 0.
+    Batting order indices are NOT reset (they persist across innings).
+
+    Args:
+        state: GameState with outs >= 3 (half-inning complete)
+
+    Returns:
+        New GameState for the next half-inning
+    """
+    if state.half == InningHalf.TOP:
+        # Top complete -> Bottom of same inning
+        return dataclass_replace(
+            state,
+            half=InningHalf.BOTTOM,
+            outs=0,
+            base_state=BaseState(),  # Clear bases
+        )
+    else:
+        # Bottom complete -> Top of next inning
+        return dataclass_replace(
+            state,
+            inning=state.inning + 1,
+            half=InningHalf.TOP,
+            outs=0,
+            base_state=BaseState(),  # Clear bases
+        )
+
+
+def check_game_complete(state: GameState) -> bool:
+    """Check if game should end.
+
+    Baseball game-end rules:
+    1. Before 9 innings complete: never ends early
+    2. After top of 9+: if home leads, they don't bat (game over)
+    3. After bottom of 9+: game ends if not tied
+    4. Walk-off: home takes lead in bottom of 9+ (ends immediately)
+
+    Args:
+        state: Current game state
+
+    Returns:
+        True if game is complete, False if play should continue
+    """
+    # Regulation: 9 innings minimum
+    if state.inning < 9:
+        return False
+
+    # After top of 9+: if home leads, they don't need to bat
+    if state.half == InningHalf.TOP and state.outs >= 3:
+        if state.home_score > state.away_score:
+            return True
+
+    # After bottom of 9+: game ends if not tied
+    if state.half == InningHalf.BOTTOM and state.outs >= 3:
+        return state.home_score != state.away_score
+
+    # Walk-off: home takes lead in bottom of 9+ (mid-inning)
+    # This check happens DURING bottom half before 3 outs
+    if (state.half == InningHalf.BOTTOM and
+        state.inning >= 9 and
+        state.home_score > state.away_score):
+        return True
+
+    return False
 
 
 class GameEngine:

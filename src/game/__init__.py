@@ -8,7 +8,7 @@ This module provides game-level data structures and orchestration:
 - GameEngine: Orchestrates half-inning and game simulation
 """
 
-from src.game.engine import GameEngine
+from src.game.engine import GameEngine, check_game_complete, transition_half_inning
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.team import Lineup, LineupSlot, Team, create_lineup
@@ -23,4 +23,6 @@ __all__ = [
     'InningHalf',
     'GameState',
     'GameEngine',
+    'transition_half_inning',
+    'check_game_complete',
 ]
