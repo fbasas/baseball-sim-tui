@@ -49,12 +49,13 @@ Plans:
   3. Game simulates inning-by-inning with proper three-outs-per-half-inning transitions
   4. Baserunners advance appropriately on hits (single, double, triple, home run)
   5. Score updates after each play and game ends when nine innings complete (or extra innings if tied)
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 02-01: TBD after planning
-- [ ] 02-02: TBD after planning
-- [ ] 02-03: TBD after planning
+- [ ] 02-01-PLAN.md — Game data structures: Position enum, Lineup dataclass, GameState frozen dataclass
+- [ ] 02-02-PLAN.md — Team container: Team.load_from_repository(), create_lineup() helper
+- [ ] 02-03-PLAN.md — GameEngine with simulate_half_inning() - runs until 3 outs
+- [ ] 02-04-PLAN.md — Full game loop: transition_half_inning(), check_game_complete(), simulate_game()
 
 ### Phase 3: Minimal Playable TUI
 **Goal**: User interacts with game through terminal dashboard showing live game state and play history
@@ -110,8 +111,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Foundation & Simulation Core | 6/6 | ✓ Complete | 2026-01-28 |
-| 2. Game Flow & Team Management | 0/TBD | Not started | - |
+| 1. Data Foundation & Simulation Core | 6/6 | Complete | 2026-01-28 |
+| 2. Game Flow & Team Management | 0/4 | Not started | - |
 | 3. Minimal Playable TUI | 0/TBD | Not started | - |
 | 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
 | 5. Narrative & Polish | 0/TBD | Not started | - |
