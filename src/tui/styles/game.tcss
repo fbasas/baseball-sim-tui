@@ -1,0 +1,78 @@
+/* Baseball Simulation TUI - Game Dashboard Layout */
+
+/* Main screen uses 3-column grid */
+Screen {
+    layout: grid;
+    grid-size: 3;
+    grid-columns: 1fr 2fr 1fr;
+    grid-rows: auto 1fr;
+}
+
+/* Boxscore spans full width at top */
+#boxscore {
+    column-span: 3;
+    height: 3;
+    dock: top;
+    border: solid $primary;
+    padding: 0 1;
+}
+
+/* Score change highlight */
+#boxscore.score-changed {
+    background: $warning;
+}
+
+/* Left column: Away lineup */
+#away-lineup {
+    row-span: 1;
+    border: solid $secondary;
+    padding: 1;
+}
+
+/* Center column: Situation + Play log */
+#center-panel {
+    row-span: 1;
+    layout: vertical;
+}
+
+#situation {
+    height: 5;
+    border: solid $secondary;
+    padding: 1;
+}
+
+#play-log {
+    border: solid $secondary;
+    padding: 0 1;
+}
+
+/* Right column: Home lineup */
+#home-lineup {
+    row-span: 1;
+    border: solid $secondary;
+    padding: 1;
+}
+
+/* Current batter highlight */
+.current-batter {
+    background: $accent;
+    text-style: bold;
+}
+
+/* End game menu modal */
+EndGameMenu {
+    align: center middle;
+}
+
+#menu {
+    width: 40;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#menu Button {
+    width: 100%;
+    margin: 1 0;
+}
