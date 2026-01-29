@@ -6,6 +6,8 @@ This package provides the core simulation algorithms including:
 - rng: Reproducible random number generation with audit trail
 - outcomes: At-bat outcome types
 - at_bat: At-bat resolution using chained binomial
+- game_state: Base state and advancement result tracking
+- advancement: Runner advancement logic with probability matrices
 """
 
 from src.simulation.odds_ratio import (
@@ -29,6 +31,17 @@ from src.simulation.at_bat import (
     determine_out_type,
     simulate_at_bat,
 )
+from src.simulation.game_state import (
+    BaseState,
+    AdvancementResult,
+)
+from src.simulation.advancement import (
+    advance_runners,
+    SINGLE_ADVANCEMENT,
+    DOUBLE_ADVANCEMENT,
+    TRIPLE_ADVANCEMENT,
+    WALK_ADVANCEMENT,
+)
 
 __all__ = [
     # odds_ratio
@@ -51,4 +64,13 @@ __all__ = [
     "resolve_at_bat",
     "determine_out_type",
     "simulate_at_bat",
+    # game_state
+    "BaseState",
+    "AdvancementResult",
+    # advancement
+    "advance_runners",
+    "SINGLE_ADVANCEMENT",
+    "DOUBLE_ADVANCEMENT",
+    "TRIPLE_ADVANCEMENT",
+    "WALK_ADVANCEMENT",
 ]
