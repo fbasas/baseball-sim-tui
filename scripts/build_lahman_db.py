@@ -571,6 +571,11 @@ def main():
         type=str,
         help="Override download URL for pre-built SQLite (bypasses CSV build)",
     )
+    parser.add_argument(
+        "--local-zip",
+        type=Path,
+        help="Use a local ZIP file instead of downloading (e.g., data/lahman_1871-2025_csv.zip)",
+    )
 
     args = parser.parse_args()
 
@@ -595,6 +600,40 @@ def main():
                 print("=" * 60)
                 return
         print("\nERROR: Failed to download or verify SQLite")
+        sys.exit(1)
+
+    # If local ZIP specified, use it
+    if args.local_zip:
+        print(f"\nStep 1: Reading local ZIP file: {args.local_zip}")
+        if not args.local_zip.exists():
+            print(f"ERROR: File not found: {args.local_zip}")
+            sys.exit(1)
+
+        with open(args.local_zip, "rb") as f:
+            zip_data = f.read()
+
+        # Verify it's a valid ZIP
+        if zip_data[:4] != b'PK\x03\x04':
+            print("ERROR: File is not a valid ZIP archive")
+            sys.exit(1)
+
+        print(f"  Size: {len(zip_data) / 1024 / 1024:.1f} MB")
+
+        # Build database from CSV
+        print("\nStep 2: Building SQLite database from CSV...")
+        build_database_from_csv(zip_data, args.output_path)
+
+        # Verify
+        print("\nStep 3: Verification...")
+        if verify_database(args.output_path):
+            print("\n" + "=" * 60)
+            print("SUCCESS!")
+            print(f"Database created: {args.output_path}")
+            print(f"Size: {args.output_path.stat().st_size / 1024 / 1024:.1f} MB")
+            print("=" * 60)
+            return
+
+        print("\nERROR: Database verification failed")
         sys.exit(1)
 
     # Try CSV sources first (more up-to-date)
