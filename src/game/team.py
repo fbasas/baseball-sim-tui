@@ -1,13 +1,14 @@
 """Team and lineup data structures for baseball simulation.
 
 This module provides dataclasses for managing batting lineups with
-position validation and circular batting order traversal.
+position validation and circular batting order traversal, as well as
+Team container for loading historical team data from the Lahman database.
 """
 
-from dataclasses import dataclass
-from typing import List, Union
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Union
 
-from src.data.models import BattingStats
+from src.data.models import BattingStats, PitchingStats, PlayerInfo, TeamSeason
 from src.game.positions import DesignatedHitter, Position
 
 
@@ -169,3 +170,118 @@ class Lineup:
             0
         """
         return (current + 1) % 9
+
+
+@dataclass
+class Team:
+    """Container for a historical team with roster and statistics.
+
+    Holds all data needed to configure a team for simulation: team info,
+    player roster, and all batting/pitching statistics. The lineup field
+    is set separately after loading to configure the starting lineup.
+
+    Attributes:
+        info: Team identity and park factors from Teams table.
+        roster: All players who appeared for this team/year.
+        batting_stats: Map of player_id to batting statistics.
+        pitching_stats: Map of player_id to pitching statistics.
+        lineup: Optional lineup, set before game starts.
+
+    Example:
+        >>> with LahmanRepository('lahman.sqlite') as repo:
+        ...     team = Team.load_from_repository(repo, 'NYA', 1927)
+        >>> team.info.team_name
+        'New York Yankees'
+        >>> len(team.get_available_batters())
+        24
+    """
+
+    info: TeamSeason
+    roster: List[PlayerInfo]
+    batting_stats: Dict[str, BattingStats]
+    pitching_stats: Dict[str, PitchingStats]
+    lineup: Optional[Lineup] = field(default=None)
+
+    @classmethod
+    def load_from_repository(
+        cls,
+        repo: "LahmanRepository",
+        team_id: str,
+        year: int,
+    ) -> "Team":
+        """Load team with all stats from database.
+
+        Loads team info, roster, and statistics for all players who
+        appeared for the team in the given year.
+
+        Args:
+            repo: LahmanRepository instance with open connection.
+            team_id: Lahman teamID (e.g., 'NYA' for Yankees).
+            year: Season year.
+
+        Returns:
+            Team with populated roster and statistics.
+
+        Raises:
+            ValueError: If team not found for the given year.
+
+        Example:
+            >>> with LahmanRepository('lahman.sqlite') as repo:
+            ...     yankees = Team.load_from_repository(repo, 'NYA', 1927)
+        """
+        # Import here to avoid circular dependency
+        from src.data.lahman import LahmanRepository as LR  # noqa: F401
+
+        info = repo.get_team_season(team_id, year)
+        if info is None:
+            raise ValueError(f"Team {team_id} not found for {year}")
+
+        roster = repo.get_team_roster(team_id, year)
+
+        # Load stats for all players
+        batting: Dict[str, BattingStats] = {}
+        pitching: Dict[str, PitchingStats] = {}
+        for player in roster:
+            b_stats = repo.get_batting_stats(player.player_id, year)
+            if b_stats:
+                batting[player.player_id] = b_stats
+            p_stats = repo.get_pitching_stats(player.player_id, year)
+            if p_stats:
+                pitching[player.player_id] = p_stats
+
+        return cls(
+            info=info,
+            roster=roster,
+            batting_stats=batting,
+            pitching_stats=pitching,
+        )
+
+    def get_available_batters(self) -> List[PlayerInfo]:
+        """Get players who have batting stats for this team/year.
+
+        Returns:
+            List of PlayerInfo for players with batting statistics.
+        """
+        return [p for p in self.roster if p.player_id in self.batting_stats]
+
+    def get_available_pitchers(self) -> List[PlayerInfo]:
+        """Get players who have pitching stats for this team/year.
+
+        Returns:
+            List of PlayerInfo for players with pitching statistics.
+        """
+        return [p for p in self.roster if p.player_id in self.pitching_stats]
+
+    def get_player(self, player_id: str) -> Optional[PlayerInfo]:
+        """Find a player in the roster by ID.
+
+        Args:
+            player_id: Lahman playerID to find.
+
+        Returns:
+            PlayerInfo if found, None otherwise.
+        """
+        for player in self.roster:
+            if player.player_id == player_id:
+                return player
+        return None
