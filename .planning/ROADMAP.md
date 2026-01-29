@@ -67,12 +67,13 @@ Plans:
   3. User sees situation panel showing current inning, outs, and baserunners
   4. User sees scrolling play-by-play log that updates after each at-bat
   5. Dashboard widgets auto-update when game state changes (no manual refresh needed)
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 03-01: TBD after planning
-- [ ] 03-02: TBD after planning
-- [ ] 03-03: TBD after planning
+- [ ] 03-01-PLAN.md — TUI infrastructure: Textual dependency, app shell, CSS layout
+- [ ] 03-02-PLAN.md — Core widgets: BoxscoreWidget, SituationWidget, LineupCard
+- [ ] 03-03-PLAN.md — Game screen integration: GameScreen, PlayByPlayLog, engine wiring
+- [ ] 03-04-PLAN.md — End game and controls: fast-forward, EndGameMenu, human verification
 
 ### Phase 4: Substitutions & Advanced Mechanics
 **Goal**: User makes in-game managerial decisions for pitching changes and pinch hitters
@@ -113,6 +114,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Data Foundation & Simulation Core | 6/6 | Complete | 2026-01-28 |
 | 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
-| 3. Minimal Playable TUI | 0/TBD | Not started | - |
+| 3. Minimal Playable TUI | 0/4 | In Progress | - |
 | 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
 | 5. Narrative & Polish | 0/TBD | Not started | - |
