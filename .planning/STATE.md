@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 1 of 5 (Data Foundation & Simulation Core)
-Plan: 1 of TBD in current phase
+Plan: 2 of TBD in current phase
 Status: In progress
-Last activity: 2026-01-29 - Completed 01-01-PLAN.md (Data Layer Foundation)
+Last activity: 2026-01-29 - Completed 01-02-PLAN.md (Odds-Ratio Method)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 3 min
-- Total execution time: 0.05 hours
+- Total plans completed: 2
+- Average duration: 3.5 min
+- Total execution time: 0.12 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01    | 1     | 3 min | 3 min    |
+| 01    | 2     | 7 min | 3.5 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3 min)
-- Trend: N/A (first plan)
+- Last 5 plans: 01-01 (3 min), 01-02 (4 min)
+- Trend: Stable
 
 *Updated after each plan completion*
 
@@ -49,6 +49,9 @@ Recent decisions affecting current work:
 - dataclasses over Pydantic: Minimal dependencies sufficient for Phase 1 (01-01)
 - Sum stats across stints when player traded mid-season (01-01)
 - NULL defaults: 'R' for bats/throws, 0 for numeric, 100 for park factors (01-01)
+- Odds-ratio over naive averaging: Formula properly weights abilities vs league context (01-02)
+- Three eras: deadball (<1920), liveball (1920-1960), modern (1961+) per sabermetric standards (01-02)
+- League prob validation: Strictly between 0 and 1 to avoid division issues (01-02)
 
 ### Pending Todos
 
@@ -60,6 +63,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (01-01 execution)
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-01-29 (01-02 execution)
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
