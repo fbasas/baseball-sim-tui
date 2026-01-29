@@ -1,2 +1,19 @@
-# Placeholder for lahman.sqlite database file
-# Download from: https://github.com/jknecht/baseball-archive-sqlite
+# Lahman Baseball Database
+#
+# This directory contains the lahman.sqlite database (gitignored).
+# Users build the database locally using the build script.
+#
+# Build command:
+#   python scripts/build_lahman_db.py
+#
+# This downloads the Lahman Database CSV files and creates lahman.sqlite.
+# Data spans 1871-present (depending on source availability).
+#
+# Source: SABR (Society for American Baseball Research)
+#   https://sabr.org/lahman-database
+#
+# Original creator: Sean Lahman
+#   https://www.seanlahman.com/baseball-archive/statistics/
+#
+# Note: lahman.sqlite is gitignored because it's ~66MB and can be
+# rebuilt from source. The build script handles downloading automatically.
