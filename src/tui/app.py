@@ -1,15 +1,22 @@
 """Main TUI application for baseball simulation."""
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static
+from textual.widgets import Header, Footer
+
+from .screens import GameScreen
 
 
 class BaseballSimApp(App):
     """Main TUI application for baseball simulation.
 
     This app provides a terminal-based interface for running baseball
-    simulations using historical player data. The layout uses a three-column
-    grid with away lineup, center game info, and home lineup.
+    simulations using historical player data. Pressing Space or Enter
+    advances the game by one at-bat.
+
+    Bindings:
+        Space/Enter: Advance one at-bat
+        f: Fast forward (simulate rest of game)
+        q: Quit
     """
 
     CSS_PATH = "styles/game.tcss"
@@ -24,26 +31,32 @@ class BaseballSimApp(App):
     def compose(self) -> ComposeResult:
         """Compose the application layout.
 
-        Yields a header, placeholder content, and footer.
-        The placeholder will be replaced by GameScreen in Plan 03.
+        Yields header and footer. GameScreen is pushed on mount.
         """
         yield Header()
-        yield Static("Game dashboard loading...", id="placeholder")
         yield Footer()
+
+    def on_mount(self) -> None:
+        """Push game screen when app starts."""
+        self.push_screen(GameScreen())
 
     def action_advance(self) -> None:
         """Advance game by one at-bat.
 
-        Placeholder action - will trigger simulation step in GameScreen.
+        Delegates to GameScreen.advance_game() if available.
         """
-        pass
+        screen = self.screen
+        if hasattr(screen, 'advance_game'):
+            screen.advance_game()
 
     def action_fast_forward(self) -> None:
         """Simulate rest of game.
 
-        Placeholder action - will fast-forward to game end in GameScreen.
+        Delegates to GameScreen.fast_forward() if available.
         """
-        pass
+        screen = self.screen
+        if hasattr(screen, 'fast_forward'):
+            screen.fast_forward()
 
 
 if __name__ == "__main__":
