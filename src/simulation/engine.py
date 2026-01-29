@@ -156,10 +156,11 @@ class SimulationEngine:
         batter_probs = apply_park_factor(batter_probs, park_factor)
 
         # Step 2: Combine using odds-ratio
+        # NOTE: Do NOT normalize - at_bat.py needs unnormalized probabilities
+        # to correctly compute out rates (implicit in the remainder)
         matchup_probs = calculate_matchup_probabilities(
             batter_probs, pitcher_probs, league_probs
         )
-        matchup_probs = normalize_probabilities(matchup_probs)
 
         # Step 3: Calculate conditional probabilities for decision tree
         game_situation = {
@@ -252,6 +253,10 @@ class SimulationEngine:
         Useful for displaying expected outcomes before an at-bat
         or analyzing matchups without running simulations.
 
+        Note: Probabilities are NOT normalized and will sum to less than 1.0.
+        The remainder represents probability of batted-ball outs.
+        Use normalize_probabilities() if you need normalized values.
+
         Args:
             batter_stats: Batter's season statistics
             pitcher_stats: Pitcher's season statistics
@@ -259,13 +264,16 @@ class SimulationEngine:
             park_factor: Park factor (100 = neutral)
 
         Returns:
-            Dictionary of normalized matchup probabilities.
+            Dictionary of unnormalized matchup probabilities.
             Keys: strikeout, walk, hbp, single, double, triple, home_run
+            The sum will be approximately 0.50-0.55 (remainder is out on contact).
 
         Example:
             >>> probs = engine.get_expected_probabilities(batter, pitcher)
             >>> print(f"K%: {probs['strikeout']:.1%}")
-            K%: 22.3%
+            K%: 16.5%
+            >>> print(f"Out on contact: {1 - sum(probs.values()):.1%}")
+            Out on contact: 46.8%
         """
         if year is None:
             year = batter_stats.year
@@ -276,10 +284,9 @@ class SimulationEngine:
 
         batter_probs = apply_park_factor(batter_probs, park_factor)
 
-        matchup_probs = calculate_matchup_probabilities(
+        return calculate_matchup_probabilities(
             batter_probs, pitcher_probs, league_probs
         )
-        return normalize_probabilities(matchup_probs)
 
     def reset_rng(self, seed: Optional[int] = None):
         """Reset RNG with new seed.
