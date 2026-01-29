@@ -323,7 +323,11 @@ class GameScreen(Screen):
         log.add_play(f"{name}: {outcome}{runs_text}")
 
     def _show_game_over(self) -> None:
-        """Show game over message in the play log."""
+        """Show game over message and end-game menu.
+
+        Logs final score to play log and pushes EndGameMenu modal
+        for user to choose replay, new game, or quit.
+        """
         log = self.query_one(PlayByPlayLog)
         state = self.game_state
         log.add_play("")
@@ -331,6 +335,48 @@ class GameScreen(Screen):
         away_name = self.away_team.info.team_name if self.away_team else "Away"
         home_name = self.home_team.info.team_name if self.home_team else "Home"
         log.add_play(f"Final: {away_name} {state.away_score} - {home_name} {state.home_score}")
+
+        # Push end game menu
+        from .end_game_menu import EndGameMenu
+        self.app.push_screen(
+            EndGameMenu(
+                winner="away" if state.away_score > state.home_score else "home",
+                away_score=state.away_score,
+                home_score=state.home_score,
+            ),
+            self._handle_end_game_choice
+        )
+
+    def _handle_end_game_choice(self, choice: Optional[str]) -> None:
+        """Handle user's end-game menu selection.
+
+        Args:
+            choice: Button ID ("replay", "new", "quit") or None if dismissed.
+        """
+        if choice == "replay" or choice == "new":
+            self._reset_game()
+        elif choice == "quit":
+            self.app.exit()
+        # None means dismissed with Escape - do nothing
+
+    def _reset_game(self) -> None:
+        """Reset game for replay.
+
+        Clears game state, hit counts, and play log.
+        Reinitializes to start of game.
+        """
+        self.game_state = GameState()
+        self.away_hits = 0
+        self.home_hits = 0
+        self._current_half_inning = (1, InningHalf.TOP)
+
+        # Clear play log and add opening divider
+        log = self.query_one(PlayByPlayLog)
+        log.clear()
+        log.add_inning_divider(1, True)
+
+        # Update widgets
+        self._update_all_widgets()
 
     def fast_forward(self) -> None:
         """Simulate rest of game rapidly with visible updates.
