@@ -3,6 +3,10 @@ name = "baseball-sim-tui"
 version = "0.1.0"
 description = "Terminal-based baseball simulation using historical player data"
 requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26.0",
+    "textual>=0.85.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
