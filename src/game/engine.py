@@ -10,8 +10,8 @@ GameEngine manages:
 - GIDP handling (counts as 2 outs)
 """
 
-from dataclasses import replace as dataclass_replace
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, replace as dataclass_replace
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from src.data.lahman import LahmanRepository
 from src.data.models import PitchingStats
@@ -21,6 +21,9 @@ from src.simulation.outcomes import AtBatOutcome
 
 from .state import GameState, InningHalf
 from .team import Lineup
+
+if TYPE_CHECKING:
+    from .team import Team
 
 
 def transition_half_inning(state: GameState) -> GameState:
@@ -216,3 +219,97 @@ class GameEngine:
             current_state = self._apply_result(current_state, result)
 
         return current_state, results
+
+
+@dataclass
+class GameResult:
+    """Complete game result with final state and play history."""
+
+    final_state: GameState
+    play_log: List[List[AtBatResult]]  # List of half-innings, each containing at-bat results
+
+    @property
+    def winner(self) -> str:
+        """Return 'away', 'home', or 'tie' (should not happen in completed game)."""
+        if self.final_state.away_score > self.final_state.home_score:
+            return 'away'
+        elif self.final_state.home_score > self.final_state.away_score:
+            return 'home'
+        return 'tie'
+
+    @property
+    def total_innings(self) -> int:
+        """Number of innings played (may be > 9 for extra innings)."""
+        return self.final_state.inning
+
+
+def simulate_game(
+    away_team: 'Team',
+    home_team: 'Team',
+    game_engine: Optional[GameEngine] = None,
+    initial_state: Optional[GameState] = None,
+    park_factor: int = 100,
+) -> GameResult:
+    """Simulate a complete 9+ inning baseball game.
+
+    Runs the game loop until completion according to baseball rules:
+    - 9 innings minimum (unless home leads after top of 9)
+    - Extra innings if tied after 9
+    - Walk-off ends game immediately when home takes lead in bottom of 9+
+
+    Args:
+        away_team: Team object with lineup set (batting order and pitcher)
+        home_team: Team object with lineup set (batting order and pitcher)
+        game_engine: Optional GameEngine instance (creates new one if not provided)
+        initial_state: Optional starting state (default: fresh GameState)
+        park_factor: Park factor for simulation (100 = neutral)
+
+    Returns:
+        GameResult with final state and complete play log
+
+    Raises:
+        ValueError: If team lineups are not set
+    """
+    # Validate lineups are set
+    if away_team.lineup is None:
+        raise ValueError("Away team lineup not set. Call create_lineup() first.")
+    if home_team.lineup is None:
+        raise ValueError("Home team lineup not set. Call create_lineup() first.")
+
+    # Initialize engine and state
+    engine = game_engine or GameEngine()
+    state = initial_state or GameState()
+    play_log: List[List[AtBatResult]] = []
+
+    while not check_game_complete(state):
+        # Determine batting team and pitching stats
+        if state.half == InningHalf.TOP:
+            batting_lineup = away_team.lineup
+            pitcher_id = home_team.lineup.starting_pitcher_id
+            pitching_stats = home_team.pitching_stats[pitcher_id]
+        else:
+            batting_lineup = home_team.lineup
+            pitcher_id = away_team.lineup.starting_pitcher_id
+            pitching_stats = away_team.pitching_stats[pitcher_id]
+
+        # Simulate half-inning
+        state, results = engine.simulate_half_inning(
+            state,
+            batting_lineup,
+            pitching_stats,
+            park_factor=park_factor,
+        )
+        play_log.append(results)
+
+        # Check for walk-off (game can end mid-inning in bottom of 9+)
+        if check_game_complete(state):
+            break
+
+        # Transition to next half-inning if 3 outs reached
+        if state.outs >= 3:
+            state = transition_half_inning(state)
+
+    # Mark game as complete
+    final_state = dataclass_replace(state, is_complete=True)
+
+    return GameResult(final_state=final_state, play_log=play_log)
