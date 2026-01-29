@@ -29,12 +29,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. At-bat simulation between pitcher and batter produces outcome probabilities that match historical distributions
   3. 1000-game simulation of historical matchup produces realistic season-level statistics within expected variance
   4. Odds-ratio method prevents naive averaging pitfall (elite pitchers dominate weak hitters as expected)
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 01-01: TBD after planning
-- [ ] 01-02: TBD after planning
-- [ ] 01-03: TBD after planning
+- [ ] 01-01-PLAN.md — Data layer: project structure, models, Lahman repository
+- [ ] 01-02-PLAN.md — Probability math: odds-ratio calculation, league averages
+- [ ] 01-03-PLAN.md — At-bat resolution: chained binomial, RNG, outcome enum
+- [ ] 01-04-PLAN.md — Runner advancement: base state, advancement matrices
+- [ ] 01-05-PLAN.md — Simulation engine: orchestration, stats calculator, validation
 
 ### Phase 2: Game Flow & Team Management
 **Goal**: User can select two historical teams and simulate a complete nine-inning game with proper baseball rules
@@ -107,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Foundation & Simulation Core | 0/TBD | Not started | - |
+| 1. Data Foundation & Simulation Core | 0/5 | Planned | - |
 | 2. Game Flow & Team Management | 0/TBD | Not started | - |
 | 3. Minimal Playable TUI | 0/TBD | Not started | - |
 | 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
