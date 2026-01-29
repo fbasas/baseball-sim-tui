@@ -10,29 +10,29 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 2 of 5 (Game Flow & Team Management)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-01-29 - Completed 02-01-PLAN.md (Game Data Structures)
+Last activity: 2026-01-29 - Completed 02-02-PLAN.md (Team Dataclass)
 
-Progress: [███████░░░] 70%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 6.0 min
-- Total execution time: 0.75 hours
+- Total plans completed: 8
+- Average duration: 5.5 min
+- Total execution time: 0.73 hours
 
 **By Phase:**
 
 | Phase | Plans | Total  | Avg/Plan |
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
-| 02    | 1     | 2 min  | 2.0 min  |
+| 02    | 2     | 4 min  | 2.0 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (4 min), 01-04 (4 min), 01-05 (7 min), 01-06 (20 min), 02-01 (2 min)
-- Trend: 02-01 fast due to straightforward data structure creation
+- Last 5 plans: 01-04 (4 min), 01-05 (7 min), 01-06 (20 min), 02-01 (2 min), 02-02 (2 min)
+- Trend: Phase 2 fast due to straightforward data structure/helper creation
 
 *Updated after each plan completion*
 
@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 - Sentinel class for DH: Not a numbered position, enables clean type checks (02-01)
 - IntEnum for Position: Enables comparison with official scoring numbers 1-9 (02-01)
 - Exclude pitcher from lineup validation: Real baseball rules, pitcher tracked separately (02-01)
+- Team not frozen: lineup field set after loading for game setup workflow (02-02)
+- Load all stats on team load: avoids N+1 queries during lineup creation (02-02)
+- Filter by stats presence: get_available_batters/pitchers for lineup selection (02-02)
 
 ### Pending Todos
 
@@ -75,6 +78,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (02-01 execution)
-Stopped at: Completed 02-01-PLAN.md (Game Data Structures)
+Last session: 2026-01-29 (02-02 execution)
+Stopped at: Completed 02-02-PLAN.md (Team Dataclass)
 Resume file: None
