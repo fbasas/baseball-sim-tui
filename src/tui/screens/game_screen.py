@@ -10,6 +10,7 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.reactive import reactive
 from textual.screen import Screen
+from textual.timer import Timer
 
 from src.data.lahman import LahmanRepository
 from src.game.engine import GameEngine, check_game_complete, transition_half_inning
@@ -54,6 +55,7 @@ class GameScreen(Screen):
         self.away_hits = 0
         self.home_hits = 0
         self._current_half_inning: Tuple[int, InningHalf] = (1, InningHalf.TOP)
+        self._fast_forward_timer: Optional[Timer] = None
 
     def compose(self) -> ComposeResult:
         """Compose the three-column game layout.
@@ -297,8 +299,8 @@ class GameScreen(Screen):
         # Update reactive state (triggers widget updates)
         self.game_state = new_state
 
-        # Check if game just ended
-        if check_game_complete(new_state):
+        # Check if game just ended (only show game over if not fast-forwarding)
+        if check_game_complete(new_state) and not self._fast_forward_timer:
             self._show_game_over()
 
     def _log_play(self, result: AtBatResult, team: Team, player_id: str) -> None:
@@ -331,9 +333,42 @@ class GameScreen(Screen):
         log.add_play(f"Final: {away_name} {state.away_score} - {home_name} {state.home_score}")
 
     def fast_forward(self) -> None:
-        """Simulate rest of game rapidly.
+        """Simulate rest of game rapidly with visible updates.
 
-        Placeholder for Plan 04 implementation.
+        Uses a timer to advance at ~20 plays/second (0.05s interval),
+        allowing the user to see plays scroll by in the log.
+        Stops automatically when game completes.
         """
-        # Will be implemented in Plan 04
-        pass
+        if self._fast_forward_timer:
+            return  # Already fast-forwarding
+
+        if check_game_complete(self.game_state):
+            return  # Game already complete
+
+        log = self.query_one(PlayByPlayLog)
+        log.add_play("")
+        log.add_play("[italic]>>> Fast forwarding...[/italic]")
+
+        self._fast_forward_timer = self.set_interval(0.05, self._fast_forward_step)
+
+    def _fast_forward_step(self) -> None:
+        """Single step during fast-forward.
+
+        Called by timer every 0.05 seconds. Advances game by one at-bat.
+        Stops fast-forward when game completes.
+        """
+        if check_game_complete(self.game_state):
+            self._stop_fast_forward()
+            self._show_game_over()
+            return
+
+        self.advance_game()
+
+    def _stop_fast_forward(self) -> None:
+        """Stop fast-forward timer.
+
+        Called when game completes or fast-forward is cancelled.
+        """
+        if self._fast_forward_timer:
+            self._fast_forward_timer.stop()
+            self._fast_forward_timer = None
