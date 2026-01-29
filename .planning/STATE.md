@@ -5,33 +5,33 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** The simulation produces realistic baseball outcomes based on actual historical player statistics, letting you experience "what if" scenarios across baseball history.
-**Current focus:** Phase 1 - Data Foundation & Simulation Core
+**Current focus:** Phase 1 Complete - Ready for Phase 2
 
 ## Current Position
 
 Phase: 1 of 5 (Data Foundation & Simulation Core)
-Plan: 4 of TBD in current phase
-Status: In progress
-Last activity: 2026-01-29 - Completed 01-04-PLAN.md (Runner Advancement)
+Plan: 5 of 5 in current phase
+Status: Phase complete
+Last activity: 2026-01-29 - Completed 01-05-PLAN.md (Simulation Engine & Validation)
 
-Progress: [████░░░░░░] 40%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 3.8 min
-- Total execution time: 0.25 hours
+- Total plans completed: 5
+- Average duration: 4.2 min
+- Total execution time: 0.35 hours
 
 **By Phase:**
 
 | Phase | Plans | Total  | Avg/Plan |
 |-------|-------|--------|----------|
-| 01    | 4     | 15 min | 3.8 min  |
+| 01    | 5     | 22 min | 4.4 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3 min), 01-02 (4 min), 01-03 (4 min), 01-04 (4 min)
-- Trend: Stable
+- Last 5 plans: 01-01 (3 min), 01-02 (4 min), 01-03 (4 min), 01-04 (4 min), 01-05 (7 min)
+- Trend: Stable (01-05 longer due to test debugging)
 
 *Updated after each plan completion*
 
@@ -57,6 +57,8 @@ Recent decisions affecting current work:
 - Out type distribution: groundout 44%, flyout 28%, lineout 21%, popup 7% (01-03)
 - Probability matrices from historical patterns (60% score on single with R2) (01-04)
 - Simplified out handling: No advancement on outs (sac fly deferred) (01-04)
+- Unnormalized probabilities: Don't normalize odds-ratio output to preserve implicit out-on-contact rate (01-05)
+- 5000 samples for BA validation: Statistical stability for 10% tolerance requirement (01-05)
 
 ### Pending Todos
 
@@ -68,6 +70,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (01-04 execution)
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-01-29 (01-05 execution)
+Stopped at: Completed 01-05-PLAN.md (Phase 1 complete)
 Resume file: None
