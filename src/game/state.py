@@ -1,0 +1,144 @@
+"""Game state data structures for baseball simulation.
+
+This module provides immutable game state tracking using frozen dataclasses.
+GameState captures all game information needed to simulate the next play.
+"""
+
+from dataclasses import dataclass, field, replace
+from enum import Enum, auto
+
+from src.simulation.game_state import BaseState
+
+
+class InningHalf(Enum):
+    """Identifies which half of an inning is being played.
+
+    TOP: Away team is batting
+    BOTTOM: Home team is batting
+    """
+
+    TOP = auto()     # Away team batting
+    BOTTOM = auto()  # Home team batting
+
+
+@dataclass(frozen=True)
+class GameState:
+    """Immutable snapshot of complete game state.
+
+    This dataclass captures all information needed to determine the next
+    play and continue simulation. It is frozen (immutable) to prevent
+    accidental state corruption and enable safe state history tracking.
+
+    Use the `with_*` methods to create modified copies of the state.
+
+    Attributes:
+        inning: Current inning number (1-indexed, 1+ for extra innings).
+        half: Which half of the inning (TOP for away batting, BOTTOM for home).
+        outs: Current number of outs in the half-inning (0-2, or 3 when complete).
+        base_state: Current base runner configuration.
+        away_score: Away team's total runs.
+        home_score: Home team's total runs.
+        away_batting_index: Away team's current position in batting order (0-8).
+        home_batting_index: Home team's current position in batting order (0-8).
+        is_complete: Whether the game has ended.
+
+    Example:
+        >>> state = GameState()
+        >>> state.inning
+        1
+        >>> state.half
+        InningHalf.TOP
+        >>> new_state = state.with_outs(2)
+        >>> state.outs  # Original unchanged
+        0
+        >>> new_state.outs
+        2
+    """
+
+    inning: int = 1
+    half: InningHalf = InningHalf.TOP
+    outs: int = 0
+    base_state: BaseState = field(default_factory=BaseState)
+    away_score: int = 0
+    home_score: int = 0
+    away_batting_index: int = 0  # 0-8 position in batting order
+    home_batting_index: int = 0
+    is_complete: bool = False
+
+    @property
+    def batting_team_score(self) -> int:
+        """Get the score of the team currently batting.
+
+        Returns:
+            Away score if top of inning, home score if bottom.
+        """
+        return self.away_score if self.half == InningHalf.TOP else self.home_score
+
+    @property
+    def fielding_team_score(self) -> int:
+        """Get the score of the team currently fielding.
+
+        Returns:
+            Home score if top of inning, away score if bottom.
+        """
+        return self.home_score if self.half == InningHalf.TOP else self.away_score
+
+    @property
+    def current_batting_index(self) -> int:
+        """Get the batting order index for the team currently batting.
+
+        Returns:
+            Away batting index if top, home batting index if bottom.
+        """
+        return self.away_batting_index if self.half == InningHalf.TOP else self.home_batting_index
+
+    def with_outs(self, outs: int) -> 'GameState':
+        """Return new state with updated out count.
+
+        Args:
+            outs: New number of outs.
+
+        Returns:
+            New GameState with updated outs.
+        """
+        return replace(self, outs=outs)
+
+    def with_score(self, away: int, home: int) -> 'GameState':
+        """Return new state with updated scores.
+
+        Args:
+            away: New away team score.
+            home: New home team score.
+
+        Returns:
+            New GameState with updated scores.
+        """
+        return replace(self, away_score=away, home_score=home)
+
+    def with_base_state(self, base_state: BaseState) -> 'GameState':
+        """Return new state with updated base runner configuration.
+
+        Args:
+            base_state: New base state.
+
+        Returns:
+            New GameState with updated base state.
+        """
+        return replace(self, base_state=base_state)
+
+    def with_batting_index(self, index: int) -> 'GameState':
+        """Return new state with updated batting index for current team.
+
+        Updates away_batting_index if top of inning, home_batting_index
+        if bottom of inning.
+
+        Args:
+            index: New batting order index (0-8).
+
+        Returns:
+            New GameState with updated batting index.
+        """
+        if self.half == InningHalf.TOP:
+            return replace(self, away_batting_index=index)
+        else:
+            return replace(self, home_batting_index=index)
