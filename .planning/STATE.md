@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** The simulation produces realistic baseball outcomes based on actual historical player statistics, letting you experience "what if" scenarios across baseball history.
-**Current focus:** Phase 2 VERIFIED Complete - Ready for Phase 3
+**Current focus:** Phase 3 - Minimal Playable TUI
 
 ## Current Position
 
-Phase: 2 of 5 (Game Flow & Team Management)
-Plan: 4 of 4 in current phase
-Status: Phase verified complete (5/5 must-haves)
-Last activity: 2026-01-29 - Phase 2 verified and complete
+Phase: 3 of 5 (Minimal Playable TUI)
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-01-29 - Completed 03-01-PLAN.md (TUI App Shell)
 
-Progress: [████████░░] 80% (2 of 5 phases)
+Progress: [████████░░] 80% (11 of 14 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 5.0 min
-- Total execution time: 0.8 hours
+- Total plans completed: 11
+- Average duration: 4.7 min
+- Total execution time: 0.9 hours
 
 **By Phase:**
 
@@ -29,10 +29,11 @@ Progress: [████████░░] 80% (2 of 5 phases)
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
+| 03    | 1     | 2 min  | 2.0 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-06 (20 min), 02-01 (2 min), 02-02 (2 min), 02-03 (4 min), 02-04 (3 min)
-- Trend: Phase 2 completed efficiently
+- Last 5 plans: 02-01 (2 min), 02-02 (2 min), 02-03 (4 min), 02-04 (3 min), 03-01 (2 min)
+- Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
 
@@ -73,6 +74,8 @@ Recent decisions affecting current work:
 - Walk-off check during bottom 9+: Detect immediately, not just at inning end (02-04)
 - Batting order persists across innings: No reset on transition (02-04)
 - BaseState cleared on every transition: Fresh bases each half-inning (02-04)
+- textual>=0.85.0 version spec: Compatible with 7.x while allowing minor updates (03-01)
+- CSS_PATH relative to app.py: Textual convention for style loading (03-01)
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (02-04 execution)
-Stopped at: Completed 02-04-PLAN.md (Full Game Loop) - Phase 2 complete
+Last session: 2026-01-29 (03-01 execution)
+Stopped at: Completed 03-01-PLAN.md (TUI App Shell)
 Resume file: None
