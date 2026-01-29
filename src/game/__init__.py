@@ -8,8 +8,11 @@ This module provides game-level data structures and orchestration:
 """
 
 from src.game.positions import DesignatedHitter, Position
+from src.game.team import Lineup, LineupSlot
 
 __all__ = [
     'Position',
     'DesignatedHitter',
+    'LineupSlot',
+    'Lineup',
 ]
