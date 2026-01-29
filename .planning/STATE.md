@@ -5,33 +5,34 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** The simulation produces realistic baseball outcomes based on actual historical player statistics, letting you experience "what if" scenarios across baseball history.
-**Current focus:** Phase 1 VERIFIED Complete - Ready for Phase 2
+**Current focus:** Phase 2 in progress - Game Flow & Team Management
 
 ## Current Position
 
-Phase: 1 of 5 (Data Foundation & Simulation Core)
-Plan: 6 of 6 in current phase (gap closure complete)
-Status: Phase verified complete (4/4 must-haves)
-Last activity: 2026-01-29 - Completed 01-06-PLAN.md (SABR Lahman Database Builder)
+Phase: 2 of 5 (Game Flow & Team Management)
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-01-29 - Completed 02-01-PLAN.md (Game Data Structures)
 
-Progress: [██████░░░░] 60%
+Progress: [███████░░░] 70%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 6.5 min
-- Total execution time: 0.7 hours
+- Total plans completed: 7
+- Average duration: 6.0 min
+- Total execution time: 0.75 hours
 
 **By Phase:**
 
 | Phase | Plans | Total  | Avg/Plan |
 |-------|-------|--------|----------|
 | 01    | 6     | 42 min | 7.0 min  |
+| 02    | 1     | 2 min  | 2.0 min  |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (4 min), 01-03 (4 min), 01-04 (4 min), 01-05 (7 min), 01-06 (20 min)
-- Trend: 01-06 longer due to network timeouts during download attempts
+- Last 5 plans: 01-03 (4 min), 01-04 (4 min), 01-05 (7 min), 01-06 (20 min), 02-01 (2 min)
+- Trend: 02-01 fast due to straightforward data structure creation
 
 *Updated after each plan completion*
 
@@ -60,6 +61,9 @@ Recent decisions affecting current work:
 - Unnormalized probabilities: Don't normalize odds-ratio output to preserve implicit out-on-contact rate (01-05)
 - 5000 samples for BA validation: Statistical stability for 10% tolerance requirement (01-05)
 - Multi-source download fallback: SABR CSVs primary, jknecht SQLite fallback (01-06)
+- Sentinel class for DH: Not a numbered position, enables clean type checks (02-01)
+- IntEnum for Position: Enables comparison with official scoring numbers 1-9 (02-01)
+- Exclude pitcher from lineup validation: Real baseball rules, pitcher tracked separately (02-01)
 
 ### Pending Todos
 
@@ -71,6 +75,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (01-06 gap closure execution)
-Stopped at: Completed 01-06-PLAN.md (Phase 1 fully complete including gap closure)
+Last session: 2026-01-29 (02-01 execution)
+Stopped at: Completed 02-01-PLAN.md (Game Data Structures)
 Resume file: None
