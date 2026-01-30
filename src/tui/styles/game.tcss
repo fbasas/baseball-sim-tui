@@ -105,3 +105,12 @@ EndGameMenu {
 #sub-buttons Button {
     margin: 0 1;
 }
+
+/* Fatigue Widget Styles */
+#fatigue {
+    height: 3;
+    width: 100%;
+    padding: 0 1;
+    margin-bottom: 1;
+    border: solid $primary-lighten-2;
+}
