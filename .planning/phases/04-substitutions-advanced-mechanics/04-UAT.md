@@ -1,14 +1,18 @@
 ---
-status: diagnosed
+status: testing
 phase: 04-substitutions-advanced-mechanics
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md]
 started: 2026-01-29T16:00:00Z
-updated: 2026-01-29T16:15:00Z
+updated: 2026-01-29T17:30:00Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 4
+name: Available Pitchers Listed in Menu
+expected: |
+  The substitution menu shows a list of available relief pitchers with their stats. Used pitchers should NOT appear (no re-entry rule).
+awaiting: user response
 
 ## Tests
 
@@ -22,51 +26,43 @@ result: pass
 
 ### 3. Substitution Menu Opens with S Key
 expected: Press 'S' during gameplay. A substitution menu modal appears showing available pitchers from the bullpen.
-result: issue
-reported: "modal appears but is too narrow, that'll be an item to tackle once we finish going through the rest of the verification"
-severity: minor
+result: pass
+notes: "Fixed - was too narrow due to ModalScreen layout:vertical default. Fixed with layout:horizontal + 50vw width."
 
 ### 4. Available Pitchers Listed in Menu
 expected: The substitution menu shows a list of available relief pitchers with their stats. Used pitchers should NOT appear (no re-entry rule).
-result: skipped
-reason: blocked by narrow substitution modal (test 3 issue)
+result: [pending]
 
 ### 5. Make Pitching Change
 expected: Select a pitcher from the list. The pitching change executes: fatigue resets to 0%, new pitcher name appears in fatigue widget, play log shows substitution message.
-result: skipped
-reason: blocked by narrow substitution modal (test 3 issue)
+result: [pending]
 
 ### 6. Removed Pitcher Cannot Re-Enter
 expected: After making a pitching change, press 'S' again. The previously-removed starting pitcher should NOT be available in the list.
-result: skipped
-reason: blocked by narrow substitution modal (test 3 issue)
+result: [pending]
 
 ### 7. Complete Game with Substitutions
 expected: Play through a complete game making at least one pitching change. Game ends normally with final score displayed.
-result: skipped
-reason: blocked by narrow substitution modal (test 3 issue)
+result: [pending]
 
 ## Summary
 
 total: 7
-passed: 2
-issues: 1
-pending: 0
-skipped: 4
+passed: 3
+issues: 0
+pending: 4
+skipped: 0
 
 ## Gaps
 
 - truth: "Substitution menu modal appears at readable width showing available pitchers"
-  status: failed
+  status: resolved
   reason: "User reported: modal appears but is too narrow"
   severity: minor
   test: 3
-  root_cause: "SubstitutionMenu.DEFAULT_CSS only sets align:center middle. Width rules are in game.tcss but ModalScreens don't inherit App CSS_PATH styles. EndGameMenu works because it has all CSS in DEFAULT_CSS."
-  artifacts:
-    - path: "src/tui/screens/substitution_menu.py"
-      issue: "DEFAULT_CSS missing width/height rules for Vertical container"
-    - path: "src/tui/styles/game.tcss"
-      issue: "SubstitutionMenu CSS rules here are never loaded by ModalScreen"
-  missing:
-    - "Move SubstitutionMenu CSS from game.tcss into SubstitutionMenu.DEFAULT_CSS"
-  debug_session: ""
+  root_cause: "ModalScreen default CSS uses layout:vertical which constrained child width. Fixed by overriding to layout:horizontal and using viewport units (50vw)."
+  resolution: "commit 21fd236 - fix(ui): properly size SubstitutionMenu modal"
+
+## Future Enhancements
+
+- Keyboard navigation with arrow keys throughout the app (noted during UAT)
