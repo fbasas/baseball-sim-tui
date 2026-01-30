@@ -6,8 +6,10 @@ GameState captures all game information needed to simulate the next play.
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
+from typing import Optional
 
 from src.simulation.game_state import BaseState
+from src.game.fatigue import FatigueState
 
 
 class InningHalf(Enum):
@@ -41,6 +43,10 @@ class GameState:
         away_batting_index: Away team's current position in batting order (0-8).
         home_batting_index: Home team's current position in batting order (0-8).
         is_complete: Whether the game has ended.
+        away_pitcher_id: Player ID of current away team pitcher.
+        home_pitcher_id: Player ID of current home team pitcher.
+        away_pitcher_fatigue: Fatigue state for away team pitcher.
+        home_pitcher_fatigue: Fatigue state for home team pitcher.
 
     Example:
         >>> state = GameState()
@@ -64,6 +70,14 @@ class GameState:
     away_batting_index: int = 0  # 0-8 position in batting order
     home_batting_index: int = 0
     is_complete: bool = False
+
+    # Pitcher tracking (player IDs)
+    away_pitcher_id: Optional[str] = None
+    home_pitcher_id: Optional[str] = None
+
+    # Fatigue state for each pitcher
+    away_pitcher_fatigue: FatigueState = field(default_factory=FatigueState)
+    home_pitcher_fatigue: FatigueState = field(default_factory=FatigueState)
 
     @property
     def batting_team_score(self) -> int:
@@ -91,6 +105,24 @@ class GameState:
             Away batting index if top, home batting index if bottom.
         """
         return self.away_batting_index if self.half == InningHalf.TOP else self.home_batting_index
+
+    @property
+    def current_pitcher_id(self) -> Optional[str]:
+        """Get the pitcher ID for the team currently fielding.
+
+        Returns:
+            Home pitcher if top of inning, away pitcher if bottom.
+        """
+        return self.home_pitcher_id if self.half == InningHalf.TOP else self.away_pitcher_id
+
+    @property
+    def current_pitcher_fatigue(self) -> FatigueState:
+        """Get fatigue state for the team currently fielding.
+
+        Returns:
+            Home pitcher fatigue if top of inning, away pitcher fatigue if bottom.
+        """
+        return self.home_pitcher_fatigue if self.half == InningHalf.TOP else self.away_pitcher_fatigue
 
     def with_outs(self, outs: int) -> 'GameState':
         """Return new state with updated out count.
@@ -142,3 +174,39 @@ class GameState:
             return replace(self, away_batting_index=index)
         else:
             return replace(self, home_batting_index=index)
+
+    def with_pitcher(self, pitcher_id: str, fatigue: Optional[FatigueState] = None) -> 'GameState':
+        """Return new state with updated pitcher for fielding team.
+
+        Args:
+            pitcher_id: New pitcher's player ID
+            fatigue: Optional fatigue state (fresh FatigueState if None)
+
+        Returns:
+            New GameState with updated pitcher for fielding team.
+        """
+        if fatigue is None:
+            fatigue = FatigueState()
+
+        if self.half == InningHalf.TOP:
+            # Top of inning: home team is fielding
+            return replace(self, home_pitcher_id=pitcher_id, home_pitcher_fatigue=fatigue)
+        else:
+            # Bottom of inning: away team is fielding
+            return replace(self, away_pitcher_id=pitcher_id, away_pitcher_fatigue=fatigue)
+
+    def with_pitcher_fatigue(self, fatigue: FatigueState) -> 'GameState':
+        """Return new state with updated fatigue for current pitcher.
+
+        Args:
+            fatigue: New fatigue state for fielding team's pitcher.
+
+        Returns:
+            New GameState with updated pitcher fatigue.
+        """
+        if self.half == InningHalf.TOP:
+            # Top of inning: home team is fielding
+            return replace(self, home_pitcher_fatigue=fatigue)
+        else:
+            # Bottom of inning: away team is fielding
+            return replace(self, away_pitcher_fatigue=fatigue)
