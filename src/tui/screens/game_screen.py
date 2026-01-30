@@ -137,6 +137,7 @@ class GameScreen(Screen):
 
         Selects the first 9 batters with stats and the first pitcher.
         Assigns standard defensive positions in simplified order.
+        Ensures pitcher is not duplicated in batting order.
 
         Args:
             team: Team to create lineup for.
@@ -144,11 +145,19 @@ class GameScreen(Screen):
         Raises:
             ValueError: If not enough players available.
         """
-        batters = team.get_available_batters()[:9]
         pitchers = team.get_available_pitchers()
+        if not pitchers:
+            raise ValueError(f"No pitchers available for {team.info.team_name}")
 
-        if len(batters) < 9 or not pitchers:
-            raise ValueError(f"Not enough players for {team.info.team_name}")
+        # Select starting pitcher first
+        starting_pitcher_id = pitchers[0].player_id
+
+        # Get batters, excluding the starting pitcher
+        all_batters = team.get_available_batters()
+        batters = [b for b in all_batters if b.player_id != starting_pitcher_id][:9]
+
+        if len(batters) < 9:
+            raise ValueError(f"Not enough batters for {team.info.team_name}")
 
         # Assign positions (simplified - standard positions)
         positions_list: List = [
