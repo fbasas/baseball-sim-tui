@@ -6,6 +6,8 @@ This module provides game-level data structures and orchestration:
 - LineupSlot, Lineup: Batting order management
 - GameState, InningHalf: Immutable game state tracking
 - GameEngine: Orchestrates half-inning and game simulation
+- FatigueState, FatigueConfig: Pitcher fatigue tracking
+- SubstitutionRecord, SubstitutionType: Substitution tracking
 """
 
 from src.game.engine import (
@@ -15,8 +17,18 @@ from src.game.engine import (
     simulate_game,
     transition_half_inning,
 )
+from src.game.fatigue import (
+    FatigueConfig,
+    FatigueState,
+    calculate_fatigue,
+    update_fatigue_state,
+)
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
+from src.game.substitutions import (
+    SubstitutionRecord,
+    SubstitutionType,
+)
 from src.game.team import Lineup, LineupSlot, Team, create_lineup
 
 __all__ = [
@@ -33,4 +45,10 @@ __all__ = [
     'transition_half_inning',
     'check_game_complete',
     'simulate_game',
+    'SubstitutionRecord',
+    'SubstitutionType',
+    'FatigueState',
+    'FatigueConfig',
+    'calculate_fatigue',
+    'update_fatigue_state',
 ]
