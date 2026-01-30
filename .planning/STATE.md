@@ -12,16 +12,16 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 Phase: 4 of 5 (Substitutions & Advanced Mechanics)
 Plan: 2 of 5 in current phase
 Status: In progress
-Last activity: 2026-01-30 - Completed 04-02-PLAN.md (Substitution tracking)
+Last activity: 2026-01-30 - Completed 04-01-PLAN.md (Pitcher fatigue model)
 
-Progress: [███████████░░░░░░░░] 78% (15 of 19 plans)
+Progress: [███████████░░░░░░░░] 84% (16 of 19 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
-- Average duration: 4.5 min
-- Total execution time: 1.1 hours
+- Total plans completed: 16
+- Average duration: 4.4 min
+- Total execution time: 1.2 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [███████████░░░░░░░░] 78% (15 of
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
 | 03    | 4     | 15 min | 3.8 min  |
-| 04    | 1     | 3 min  | 3.0 min  |
+| 04    | 2     | 7 min  | 3.5 min  |
 
 **Recent Trend:**
-- Last 5 plans: 03-01 (2 min), 03-02 (2 min), 03-03 (3 min), 03-04 (8 min), 04-02 (3 min)
+- Last 5 plans: 03-02 (2 min), 03-03 (3 min), 03-04 (8 min), 04-02 (3 min), 04-01 (4 min)
 - Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
@@ -87,6 +87,11 @@ Recent decisions affecting current work:
 - Year in team display: Show "1927 Yankees" for clarity (03-04)
 - Runs only in boxscore: Simplified display, hits deferred to later phase (03-04)
 - ModalScreen with callback: EndGameMenu returns button ID for handler (03-04)
+- Times-through-order penalties from The Book: 0%/0%/5%/12%/20% for 1st-5th+ times (04-01)
+- Linear batters-faced accumulation: 2% fatigue per batter (04-01)
+- Stress event tracking: Separate accumulation for runners on, close games (04-01)
+- Immutable frozen dataclasses: FatigueState follows GameState pattern (04-01)
+- Separate config dataclass: FatigueConfig for tunable coefficients (04-01)
 - Frozen dataclass for SubstitutionRecord: Ensures immutability of historical records (04-02)
 - Set-based player tracking: O(1) lookup for removed_players availability checks (04-02)
 - Tuple validation pattern: (bool, str) return for clear error messaging (04-02)
@@ -103,6 +108,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-30 (04-02 execution)
-Stopped at: Completed 04-02-PLAN.md (Substitution tracking)
+Last session: 2026-01-30 (04-01 execution)
+Stopped at: Completed 04-01-PLAN.md (Pitcher fatigue model)
 Resume file: None
