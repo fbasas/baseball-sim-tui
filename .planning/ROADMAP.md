@@ -84,11 +84,14 @@ Plans:
   2. User can send pinch hitter to bat in place of current batter
   3. Removed players cannot be reused in same game (substitution rules enforced)
   4. Pitcher fatigue affects performance based on pitch count and times through order
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 04-01: TBD after planning
-- [ ] 04-02: TBD after planning
+- [ ] 04-01-PLAN.md — Fatigue model: FatigueState, calculate_fatigue(), times-through-order penalty
+- [ ] 04-02-PLAN.md — Substitution tracking: SubstitutionManager, no re-entry rules, DH forfeiture
+- [ ] 04-03-PLAN.md — Engine integration: fatigue modifiers, pitcher tracking, make_substitution()
+- [ ] 04-04-PLAN.md — Substitution UI: SubstitutionMenu modal, FatigueWidget display
+- [ ] 04-05-PLAN.md — GameScreen integration: S-key binding, substitution execution, human verification
 
 ### Phase 5: Narrative & Polish
 **Goal**: Game outcomes are described with narrative text and interface has visual polish
@@ -115,5 +118,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Data Foundation & Simulation Core | 6/6 | Complete | 2026-01-28 |
 | 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
-| 4. Substitutions & Advanced Mechanics | 0/TBD | Not started | - |
+| 4. Substitutions & Advanced Mechanics | 0/5 | Planned | - |
 | 5. Narrative & Polish | 0/TBD | Not started | - |
