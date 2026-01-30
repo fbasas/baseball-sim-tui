@@ -47,6 +47,14 @@ Screen {
     background: $surface;
 }
 
+#play-log > * {
+    background: $surface;
+}
+
+#play-log ScrollBar {
+    background: $surface;
+}
+
 /* Right column: Home lineup */
 #home-lineup {
     row-span: 1;
