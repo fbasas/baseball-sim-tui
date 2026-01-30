@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 04-substitutions-advanced-mechanics
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md]
 started: 2026-01-29T16:00:00Z
@@ -61,7 +61,12 @@ skipped: 4
   reason: "User reported: modal appears but is too narrow"
   severity: minor
   test: 3
-  root_cause: ""
-  artifacts: []
-  missing: []
+  root_cause: "SubstitutionMenu.DEFAULT_CSS only sets align:center middle. Width rules are in game.tcss but ModalScreens don't inherit App CSS_PATH styles. EndGameMenu works because it has all CSS in DEFAULT_CSS."
+  artifacts:
+    - path: "src/tui/screens/substitution_menu.py"
+      issue: "DEFAULT_CSS missing width/height rules for Vertical container"
+    - path: "src/tui/styles/game.tcss"
+      issue: "SubstitutionMenu CSS rules here are never loaded by ModalScreen"
+  missing:
+    - "Move SubstitutionMenu CSS from game.tcss into SubstitutionMenu.DEFAULT_CSS"
   debug_session: ""
