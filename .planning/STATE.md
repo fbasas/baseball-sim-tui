@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** The simulation produces realistic baseball outcomes based on actual historical player statistics, letting you experience "what if" scenarios across baseball history.
-**Current focus:** Phase 3 Complete - Ready for Phase 4
+**Current focus:** Phase 4 Complete (testing deferred) - Ready for Phase 5
 
 ## Current Position
 
-Phase: 4 of 5 (Substitutions & Advanced Mechanics)
-Plan: 4 of 5 in current phase
-Status: In progress
-Last activity: 2026-01-30 - Completed 04-03-PLAN.md (Game engine integration)
+Phase: 4 of 5 (Substitutions & Advanced Mechanics) - COMPLETE
+Plan: 5 of 5 in current phase - COMPLETE (testing deferred)
+Status: Phase complete, acceptance testing deferred
+Last activity: 2026-01-29 - Completed 04-05-PLAN.md (GameScreen integration)
 
-Progress: [███████████░░░░░░░░] 89% (17 of 19 plans)
+Progress: [██████████████████░] 95% (19 of 19 plans, testing pending)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
-- Average duration: 4.3 min
-- Total execution time: 1.2 hours
+- Total plans completed: 19
+- Average duration: 5.2 min
+- Total execution time: ~1.6 hours
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [███████████░░░░░░░░] 89% (17 of
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
 | 03    | 4     | 15 min | 3.8 min  |
-| 04    | 3     | 14 min | 3.7 min  |
+| 04    | 5     | 30 min | 6.0 min  |
 
 **Recent Trend:**
-- Last 5 plans: 03-04 (8 min), 04-02 (3 min), 04-01 (4 min), 04-03 (4 min), 04-04 (3 min)
-- Trend: Maintaining fast execution velocity
+- Last 5 plans: 04-01 (4 min), 04-02 (3 min), 04-03 (4 min), 04-04 (3 min), 04-05 (45 min)
+- Note: 04-05 extended due to CSS debugging for substitution menu width
 
 *Updated after each plan completion*
 
@@ -103,17 +103,25 @@ Recent decisions affecting current work:
 - Color thresholds for fatigue: green (<30%), yellow (30-60%), red (>60%) (04-04)
 - Visual bar pattern: 10-char width with █ filled, ░ empty (04-04)
 - Availability status pattern: grayed + suffix for unavailable items (04-04)
+- Exclude starting pitcher from batting order: Prevents duplicate in lineup (04-05)
+- Simplified substitution menu: Vertical layout, pitching changes only for now (04-05)
 
 ### Pending Todos
 
-None.
+- Complete acceptance testing for Phase 4 (04-05 human verification)
+- Fix substitution menu width styling (Textual ModalScreen CSS issue)
 
 ### Blockers/Concerns
 
-None.
+- **Substitution menu width:** Modal doesn't respect CSS width settings. Functional but narrow display. May need different Textual approach.
 
 ## Session Continuity
 
-Last session: 2026-01-30 (04-03 execution)
-Stopped at: Completed 04-03-PLAN.md (Game engine integration)
+Last session: 2026-01-29 (04-05 execution)
+Stopped at: Completed 04-05-PLAN.md (testing deferred)
 Resume file: None
+
+**When resuming Phase 4 testing:**
+1. Run `python -m src.tui.app`
+2. Verify fatigue display and substitution flow
+3. Complete human verification checklist from 04-05-PLAN.md
