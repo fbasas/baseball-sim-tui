@@ -286,6 +286,43 @@ class Team:
                 return player
         return None
 
+    def update_lineup_slot(
+        self,
+        slot_index: int,
+        new_player_id: str,
+        new_position: Optional[Union[Position, type]] = None,
+    ) -> None:
+        """Update a slot in the active lineup.
+
+        Args:
+            slot_index: Batting order position (0-8)
+            new_player_id: Replacement player ID
+            new_position: New position (keeps existing if None)
+
+        Raises:
+            ValueError: If player doesn't have batting stats or lineup not set
+        """
+        if self.lineup is None:
+            raise ValueError("Cannot update lineup slot: lineup not set")
+
+        if new_player_id not in self.batting_stats:
+            raise ValueError(
+                f"Player {new_player_id} has no batting stats for this team/year"
+            )
+
+        # Get current slot
+        current_slot = self.lineup.slots[slot_index]
+
+        # Keep existing position if not specified
+        position = new_position if new_position is not None else current_slot.position
+
+        # Update the slot in place
+        self.lineup.slots[slot_index] = LineupSlot(
+            player_id=new_player_id,
+            position=position,
+            batting_stats=self.batting_stats[new_player_id],
+        )
+
 
 def create_lineup(
     team: Team,

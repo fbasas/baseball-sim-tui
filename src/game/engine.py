@@ -26,6 +26,7 @@ from .team import Lineup
 
 if TYPE_CHECKING:
     from .team import Team
+    from .positions import Position
 
 
 def apply_fatigue_modifier(
@@ -160,6 +161,113 @@ class GameEngine:
     def reset_rng(self, seed: Optional[int] = None):
         """Reset RNG for reproducible games."""
         self.sim.reset_rng(seed)
+
+    def make_substitution(
+        self,
+        state: GameState,
+        team: 'Team',
+        is_away_team: bool,
+        player_out_id: str,
+        player_in_id: str,
+        new_position: Optional['Position'] = None,
+        is_pitching_change: bool = False,
+    ) -> Tuple[GameState, 'Team']:
+        """Execute a substitution and return updated state/team.
+
+        For pitching changes:
+        - Updates current pitcher in GameState
+        - Resets pitcher fatigue to fresh state
+        - Records substitution in manager
+
+        For position players:
+        - Updates lineup slot with new player
+        - Records substitution in manager
+
+        Args:
+            state: Current GameState
+            team: Team making substitution
+            is_away_team: True if away team making sub
+            player_out_id: Player being removed
+            player_in_id: Player entering
+            new_position: Position for entering player (None keeps same)
+            is_pitching_change: True if this is a pitching change
+
+        Returns:
+            (new_state, modified_team) tuple
+
+        Raises:
+            ValueError: If substitution is illegal (re-entry, invalid player)
+        """
+        from src.game.positions import Position
+        from src.game.substitutions import SubstitutionRecord, SubstitutionType
+
+        # Validate substitution if manager exists
+        if self.sub_manager is not None:
+            if is_pitching_change:
+                valid, error = self.sub_manager.validate_pitching_change(
+                    player_out_id, player_in_id
+                )
+            else:
+                valid, error = self.sub_manager.validate_pinch_hitter(
+                    player_out_id, player_in_id
+                )
+            if not valid:
+                raise ValueError(error)
+
+        if is_pitching_change:
+            # Update pitcher in state
+            new_state = state.with_pitcher(player_in_id, FatigueState())
+
+            # Record substitution if manager exists
+            if self.sub_manager is not None:
+                record = SubstitutionRecord(
+                    inning=state.inning,
+                    half=state.half,
+                    sub_type=SubstitutionType.PITCHING_CHANGE,
+                    player_out_id=player_out_id,
+                    player_in_id=player_in_id,
+                    old_position=Position.PITCHER if isinstance(new_position, type(Position)) else None,
+                    new_position=Position.PITCHER if isinstance(new_position, type(Position)) else None,
+                    batting_order_slot=0,  # Pitchers typically don't have batting slot in lineup
+                    dh_forfeited=False,
+                )
+                self.sub_manager.record_substitution(record)
+
+            return new_state, team
+        else:
+            # Position player substitution
+            if team.lineup is None:
+                raise ValueError("Team lineup not set")
+
+            # Find which slot the player_out is in
+            slot_index = None
+            for i, slot in enumerate(team.lineup.slots):
+                if slot.player_id == player_out_id:
+                    slot_index = i
+                    break
+
+            if slot_index is None:
+                raise ValueError(f"Player {player_out_id} not found in lineup")
+
+            # Update the lineup
+            team.update_lineup_slot(slot_index, player_in_id, new_position)
+
+            # Record substitution if manager exists
+            if self.sub_manager is not None:
+                record = SubstitutionRecord(
+                    inning=state.inning,
+                    half=state.half,
+                    sub_type=SubstitutionType.PINCH_HITTER,
+                    player_out_id=player_out_id,
+                    player_in_id=player_in_id,
+                    old_position=team.lineup.slots[slot_index].position if isinstance(team.lineup.slots[slot_index].position, Position) else None,
+                    new_position=new_position,
+                    batting_order_slot=slot_index,
+                    dh_forfeited=False,
+                )
+                self.sub_manager.record_substitution(record)
+
+            return state, team
 
     def _apply_result(
         self,
