@@ -63,4 +63,4 @@ class FatigueWidget(Static):
         filled = int(self._fatigue_value * 10)
         bar = "█" * filled + "░" * (10 - filled)
 
-        return f"[bold]{self._pitcher_name}[/bold]\nFatigue: [{color}]{bar}[/{color}] {pct}%"
+        return f"[bold]Pitcher[/bold]\n{self._pitcher_name}: [{color}]{bar}[/{color}] {pct}%"
