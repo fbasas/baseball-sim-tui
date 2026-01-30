@@ -80,9 +80,14 @@ EndGameMenu {
 }
 
 /* Substitution Menu Styles */
+SubstitutionMenu {
+    align: center middle;
+}
+
 #sub-menu-container {
-    width: 80;
-    height: 25;
+    width: 90%;
+    max-width: 120;
+    height: 80%;
     background: $surface;
     border: solid $primary;
     padding: 1 2;
