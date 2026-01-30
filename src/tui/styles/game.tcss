@@ -76,3 +76,32 @@ EndGameMenu {
     width: 100%;
     margin: 1 0;
 }
+
+/* Substitution Menu Styles */
+#sub-menu-container {
+    width: 60;
+    height: 30;
+    background: $surface;
+    border: solid $primary;
+    padding: 1;
+}
+
+#sub-title {
+    text-align: center;
+    margin-bottom: 1;
+}
+
+#pitcher-list, #batter-list {
+    height: auto;
+    max-height: 15;
+    overflow-y: auto;
+}
+
+#sub-buttons {
+    margin-top: 1;
+    align: center middle;
+}
+
+#sub-buttons Button {
+    margin: 0 1;
+}
