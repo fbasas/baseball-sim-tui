@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, Static, TabbedContent, TabPane
+from textual.widgets import Button, Label, Static
 
 
 class PlayerSelected(Message):
@@ -75,43 +75,6 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     SubstitutionMenu {
         align: center middle;
     }
-
-    #sub-menu-container {
-        width: 70%;
-        height: 80%;
-        background: $surface;
-        border: solid $primary;
-        padding: 1 2;
-    }
-
-    #pitcher-list, #batter-list {
-        height: auto;
-        max-height: 100%;
-        overflow-y: auto;
-        padding: 1;
-    }
-
-    PlayerListItem {
-        padding: 0 1;
-    }
-
-    PlayerListItem:hover {
-        background: $primary-darken-2;
-    }
-
-    PlayerListItem:focus {
-        background: $accent;
-    }
-
-    #sub-buttons {
-        margin-top: 1;
-        align: center middle;
-        height: auto;
-    }
-
-    #sub-buttons Button {
-        margin: 0 1;
-    }
     """
 
     BINDINGS = [
@@ -143,26 +106,23 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         self._selected_batter: Optional[str] = None
 
     def compose(self) -> ComposeResult:
-        with Container(id="sub-menu-container"):
-            yield Label("[bold]Substitutions[/bold]", id="sub-title")
-
-            with TabbedContent():
-                with TabPane("Pitching Change", id="pitching-tab"):
-                    yield Label("Select relief pitcher:")
-                    with Vertical(id="pitcher-list"):
-                        for pid, name, era, avail in self._pitchers:
-                            stats = f"ERA {era:.2f}"
-                            yield PlayerListItem(pid, name, stats, avail, id=f"p-{pid}")
-
-                with TabPane("Pinch Hitter", id="batter-tab"):
-                    yield Label("Select pinch hitter:")
-                    with Vertical(id="batter-list"):
-                        for bid, name, slash, avail in self._batters:
-                            yield PlayerListItem(bid, name, slash, avail, id=f"b-{bid}")
-
+        with Vertical(id="sub-menu-container"):
+            yield Label("[bold]═══ SUBSTITUTIONS ═══[/bold]", id="sub-title")
+            yield Label("")
+            with Horizontal(id="tab-buttons"):
+                yield Button("Pitching Change", id="tab-pitching", variant="primary")
+                yield Button("Pinch Hitter", id="tab-batter", variant="default")
+            yield Label("")
+            yield Label("[bold]Available Relievers:[/bold]")
+            with Vertical(id="pitcher-list"):
+                for pid, name, era, avail in self._pitchers:
+                    stats = f"ERA {era:.2f}"
+                    yield PlayerListItem(pid, name, stats, avail, id=f"p-{pid}")
+            yield Label("")
             with Horizontal(id="sub-buttons"):
-                yield Button("Confirm", id="confirm", variant="primary")
-                yield Button("Cancel", id="cancel", variant="default")
+                yield Button("Confirm", id="confirm", variant="success")
+                yield Button("Cancel", id="cancel", variant="error")
+
 
     def on_player_selected(self, message: PlayerSelected) -> None:
         """Handle player selection click.
@@ -180,18 +140,10 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         if event.button.id == "cancel":
             self.dismiss(None)
         elif event.button.id == "confirm":
-            # Determine which tab is active and return appropriate substitution
-            tabbed = self.query_one(TabbedContent)
-            active_tab = tabbed.active
-
-            if active_tab == "pitching-tab" and self._selected_pitcher:
-                # Pitching change
+            # For now, only support pitching changes
+            if self._selected_pitcher:
                 self.dismiss(("pitching_change", self._current_pitcher, self._selected_pitcher))
-            elif active_tab == "batter-tab" and self._selected_batter:
-                # Pinch hitter
-                self.dismiss(("pinch_hitter", self._current_batter, self._selected_batter))
             else:
-                # No selection made - do nothing
                 self.dismiss(None)
 
     def action_cancel(self) -> None:
