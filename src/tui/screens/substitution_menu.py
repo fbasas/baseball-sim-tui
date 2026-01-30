@@ -75,6 +75,48 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     SubstitutionMenu {
         align: center middle;
     }
+
+    SubstitutionMenu > Vertical {
+        width: 60;
+        min-width: 60;
+        height: 18;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+
+    SubstitutionMenu #sub-title {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    SubstitutionMenu #pitcher-list, SubstitutionMenu #batter-list {
+        height: auto;
+        max-height: 12;
+        overflow-y: auto;
+        padding: 1;
+    }
+
+    SubstitutionMenu PlayerListItem {
+        padding: 0 1;
+    }
+
+    SubstitutionMenu PlayerListItem:hover {
+        background: $primary-darken-2;
+    }
+
+    SubstitutionMenu PlayerListItem:focus {
+        background: $accent;
+    }
+
+    SubstitutionMenu #sub-buttons {
+        margin-top: 1;
+        align: center middle;
+    }
+
+    SubstitutionMenu #sub-buttons Button {
+        margin: 0 1;
+    }
     """
 
     BINDINGS = [

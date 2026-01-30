@@ -79,52 +79,8 @@ EndGameMenu {
     margin: 1 0;
 }
 
-/* Substitution Menu Styles */
-SubstitutionMenu {
-    align: center middle;
-}
-
-SubstitutionMenu > Vertical {
-    width: 60;
-    min-width: 60;
-    height: 18;
-    background: $surface;
-    border: solid $primary;
-    padding: 1 2;
-}
-
-#sub-title {
-    text-align: center;
-    margin-bottom: 1;
-}
-
-#pitcher-list, #batter-list {
-    height: auto;
-    max-height: 12;
-    overflow-y: auto;
-    padding: 1;
-}
-
-PlayerListItem {
-    padding: 0 1;
-}
-
-PlayerListItem:hover {
-    background: $primary-darken-2;
-}
-
-PlayerListItem:focus {
-    background: $accent;
-}
-
-#sub-buttons {
-    margin-top: 1;
-    align: center middle;
-}
-
-#sub-buttons Button {
-    margin: 0 1;
-}
+/* Substitution Menu Styles - moved to SubstitutionMenu.DEFAULT_CSS */
+/* ModalScreens don't inherit App CSS_PATH, so styles must be in DEFAULT_CSS */
 
 /* Fatigue Widget Styles */
 #fatigue {
