@@ -85,9 +85,8 @@ SubstitutionMenu {
 }
 
 #sub-menu-container {
-    width: 90%;
-    max-width: 120;
-    height: 80%;
+    width: 100;
+    height: 20;
     background: $surface;
     border: solid $primary;
     padding: 1 2;
