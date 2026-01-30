@@ -25,6 +25,7 @@ class BaseballSimApp(App):
         ("space", "advance", "Next Play"),
         ("enter", "advance", "Next Play"),
         ("f", "fast_forward", "Fast Forward"),
+        ("s", "substitute", "Substitutions"),
         ("q", "quit", "Quit"),
     ]
 
@@ -57,6 +58,15 @@ class BaseballSimApp(App):
         screen = self.screen
         if hasattr(screen, 'fast_forward'):
             screen.fast_forward()
+
+    def action_substitute(self) -> None:
+        """Open substitution menu.
+
+        Delegates to GameScreen.show_substitution_menu() if available.
+        """
+        screen = self.screen
+        if hasattr(screen, 'show_substitution_menu'):
+            screen.show_substitution_menu()
 
 
 if __name__ == "__main__":

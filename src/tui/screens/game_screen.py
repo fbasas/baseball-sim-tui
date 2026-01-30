@@ -469,3 +469,87 @@ class GameScreen(Screen):
         if self._fast_forward_timer:
             self._fast_forward_timer.stop()
             self._fast_forward_timer = None
+
+    def show_substitution_menu(self) -> None:
+        """Open substitution menu modal.
+
+        Determines available players from current teams and shows
+        SubstitutionMenu with pitchers and batters.
+        """
+        if not self.away_team or not self.home_team:
+            return
+
+        state = self.game_state
+
+        # Determine which team is fielding (pitching) and which is batting
+        if state.half == InningHalf.TOP:
+            # Away batting, Home pitching
+            fielding_team = self.home_team
+            batting_team = self.away_team
+            current_pitcher_id = state.home_pitcher_id
+            current_batter_index = state.away_batting_index
+        else:
+            # Home batting, Away pitching
+            fielding_team = self.away_team
+            batting_team = self.home_team
+            current_pitcher_id = state.away_pitcher_id
+            current_batter_index = state.home_batting_index
+
+        # Gather available pitchers (all except starter)
+        pitchers = []
+        for player_id, stats in fielding_team.pitching_stats.items():
+            if player_id != fielding_team.lineup.starting_pitcher_id:
+                player = fielding_team.get_player(player_id)
+                if player:
+                    name = f"{player.name_first[0]}. {player.name_last}"
+                else:
+                    name = player_id
+                era = (stats.earned_runs / stats.innings_pitched * 9) if stats.innings_pitched > 0 else 0.0
+                is_available = self.sub_manager.is_player_available(player_id)
+                pitchers.append((player_id, name, era, is_available))
+
+        # Gather available batters (bench players not in lineup)
+        lineup_player_ids = {slot.player_id for slot in batting_team.lineup.slots}
+        batters = []
+        for player_id, stats in batting_team.batting_stats.items():
+            if player_id not in lineup_player_ids:
+                player = batting_team.get_player(player_id)
+                if player:
+                    name = f"{player.name_first[0]}. {player.name_last}"
+                else:
+                    name = player_id
+
+                # Calculate slash line
+                avg = stats.hits / stats.at_bats if stats.at_bats > 0 else 0.0
+                obp = (stats.hits + stats.walks) / (stats.at_bats + stats.walks) if (stats.at_bats + stats.walks) > 0 else 0.0
+                slg = (stats.singles + 2*stats.doubles + 3*stats.triples + 4*stats.home_runs) / stats.at_bats if stats.at_bats > 0 else 0.0
+                slash = f"{avg:.3f}/{obp:.3f}/{slg:.3f}"
+
+                is_available = self.sub_manager.is_player_available(player_id)
+                batters.append((player_id, name, slash, is_available))
+
+        # Get current batter ID
+        current_batter_slot = batting_team.lineup.get_batter(current_batter_index)
+        current_batter_id = current_batter_slot.player_id
+
+        # Push substitution menu modal with callback
+        self.app.push_screen(
+            SubstitutionMenu(
+                pitchers=pitchers,
+                batters=batters,
+                current_pitcher_id=current_pitcher_id,
+                current_batter_id=current_batter_id,
+            ),
+            self._handle_substitution
+        )
+
+    def _handle_substitution(self, result: Optional[Tuple[str, str, str]]) -> None:
+        """Handle substitution selection from menu.
+
+        Args:
+            result: Tuple of (sub_type, player_out_id, player_in_id) or None if cancelled.
+        """
+        # Placeholder - will be implemented in Task 3
+        if result:
+            log = self.query_one(PlayByPlayLog)
+            log.add_play("[italic]Substitution placeholder - not yet implemented[/italic]")
