@@ -255,12 +255,12 @@ class GameScreen(Screen):
             # Home team is pitching
             pitcher_id = state.home_pitcher_id
             pitching_team = self.home_team
-            fatigue = state.home_fatigue
+            fatigue = state.home_pitcher_fatigue
         else:
             # Away team is pitching
             pitcher_id = state.away_pitcher_id
             pitching_team = self.away_team
-            fatigue = state.away_fatigue
+            fatigue = state.away_pitcher_fatigue
 
         # Get pitcher name
         if pitching_team and pitcher_id:
@@ -581,14 +581,14 @@ class GameScreen(Screen):
                 self.game_state = dataclass_replace(
                     state,
                     home_pitcher_id=player_in_id,
-                    home_fatigue=FatigueState()  # Fresh pitcher
+                    home_pitcher_fatigue=FatigueState()  # Fresh pitcher
                 )
             else:
                 # Away team is pitching
                 self.game_state = dataclass_replace(
                     state,
                     away_pitcher_id=player_in_id,
-                    away_fatigue=FatigueState()  # Fresh pitcher
+                    away_pitcher_fatigue=FatigueState()  # Fresh pitcher
                 )
 
             # Record substitution in manager
