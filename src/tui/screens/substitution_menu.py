@@ -71,6 +71,49 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     sub_type is 'pitching_change' or 'pinch_hitter'.
     """
 
+    DEFAULT_CSS = """
+    SubstitutionMenu {
+        align: center middle;
+    }
+
+    #sub-menu-container {
+        width: 70%;
+        height: 80%;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+
+    #pitcher-list, #batter-list {
+        height: auto;
+        max-height: 100%;
+        overflow-y: auto;
+        padding: 1;
+    }
+
+    PlayerListItem {
+        padding: 0 1;
+    }
+
+    PlayerListItem:hover {
+        background: $primary-darken-2;
+    }
+
+    PlayerListItem:focus {
+        background: $accent;
+    }
+
+    #sub-buttons {
+        margin-top: 1;
+        align: center middle;
+        height: auto;
+    }
+
+    #sub-buttons Button {
+        margin: 0 1;
+    }
+    """
+
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
     ]
