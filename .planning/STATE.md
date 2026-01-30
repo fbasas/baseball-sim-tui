@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 4 of 5 (Substitutions & Advanced Mechanics)
-Plan: 2 of 5 in current phase
+Plan: 4 of 5 in current phase
 Status: In progress
-Last activity: 2026-01-30 - Completed 04-01-PLAN.md (Pitcher fatigue model)
+Last activity: 2026-01-30 - Completed 04-04-PLAN.md (Substitution menu UI)
 
-Progress: [███████████░░░░░░░░] 84% (16 of 19 plans)
+Progress: [███████████░░░░░░░░] 89% (17 of 19 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
-- Average duration: 4.4 min
+- Total plans completed: 17
+- Average duration: 4.3 min
 - Total execution time: 1.2 hours
 
 **By Phase:**
@@ -30,10 +30,10 @@ Progress: [███████████░░░░░░░░] 84% (16 of
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
 | 03    | 4     | 15 min | 3.8 min  |
-| 04    | 2     | 7 min  | 3.5 min  |
+| 04    | 3     | 10 min | 3.3 min  |
 
 **Recent Trend:**
-- Last 5 plans: 03-02 (2 min), 03-03 (3 min), 03-04 (8 min), 04-02 (3 min), 04-01 (4 min)
+- Last 5 plans: 03-03 (3 min), 03-04 (8 min), 04-02 (3 min), 04-01 (4 min), 04-04 (3 min)
 - Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
@@ -97,6 +97,9 @@ Recent decisions affecting current work:
 - Tuple validation pattern: (bool, str) return for clear error messaging (04-02)
 - Infer team from InningHalf: DH forfeiture uses game state context (04-02)
 - Separate history from removed_players: Clear separation of concerns (04-02)
+- Color thresholds for fatigue: green (<30%), yellow (30-60%), red (>60%) (04-04)
+- Visual bar pattern: 10-char width with █ filled, ░ empty (04-04)
+- Availability status pattern: grayed + suffix for unavailable items (04-04)
 
 ### Pending Todos
 
@@ -108,6 +111,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-30 (04-01 execution)
-Stopped at: Completed 04-01-PLAN.md (Pitcher fatigue model)
+Last session: 2026-01-30 (04-04 execution)
+Stopped at: Completed 04-04-PLAN.md (Substitution menu UI)
 Resume file: None
