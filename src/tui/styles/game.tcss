@@ -45,14 +45,8 @@ Screen {
     border: solid $secondary;
     padding: 0 1;
     background: $surface;
-}
-
-#play-log > * {
-    background: $surface;
-}
-
-#play-log ScrollBar {
-    background: $surface;
+    scrollbar-background: $surface;
+    scrollbar-corner-color: $surface;
 }
 
 /* Right column: Home lineup */
