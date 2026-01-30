@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 Phase: 4 of 5 (Substitutions & Advanced Mechanics)
 Plan: 4 of 5 in current phase
 Status: In progress
-Last activity: 2026-01-30 - Completed 04-04-PLAN.md (Substitution menu UI)
+Last activity: 2026-01-30 - Completed 04-03-PLAN.md (Game engine integration)
 
 Progress: [███████████░░░░░░░░] 89% (17 of 19 plans)
 
@@ -30,10 +30,10 @@ Progress: [███████████░░░░░░░░] 89% (17 of
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
 | 03    | 4     | 15 min | 3.8 min  |
-| 04    | 3     | 10 min | 3.3 min  |
+| 04    | 3     | 14 min | 3.7 min  |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (3 min), 03-04 (8 min), 04-02 (3 min), 04-01 (4 min), 04-04 (3 min)
+- Last 5 plans: 03-04 (8 min), 04-02 (3 min), 04-01 (4 min), 04-03 (4 min), 04-04 (3 min)
 - Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
@@ -97,6 +97,9 @@ Recent decisions affecting current work:
 - Tuple validation pattern: (bool, str) return for clear error messaging (04-02)
 - Infer team from InningHalf: DH forfeiture uses game state context (04-02)
 - Separate history from removed_players: Clear separation of concerns (04-02)
+- Fatigue multipliers differential: 50% more hits, 30% walks, 40% HRs at max fatigue (04-03)
+- Optional SubstitutionManager: Backward compatibility for existing code (04-03)
+- Fresh fatigue default: with_pitcher() resets to FatigueState() unless specified (04-03)
 - Color thresholds for fatigue: green (<30%), yellow (30-60%), red (>60%) (04-04)
 - Visual bar pattern: 10-char width with █ filled, ░ empty (04-04)
 - Availability status pattern: grayed + suffix for unavailable items (04-04)
@@ -111,6 +114,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-30 (04-04 execution)
-Stopped at: Completed 04-04-PLAN.md (Substitution menu UI)
+Last session: 2026-01-30 (04-03 execution)
+Stopped at: Completed 04-03-PLAN.md (Game engine integration)
 Resume file: None
