@@ -45,8 +45,7 @@ Screen {
     border: solid $secondary;
     padding: 0 1;
     background: $surface;
-    scrollbar-background: $surface;
-    scrollbar-corner-color: $surface;
+    overflow-x: hidden;
 }
 
 /* Right column: Home lineup */
