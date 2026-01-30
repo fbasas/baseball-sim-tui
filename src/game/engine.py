@@ -18,12 +18,42 @@ from src.data.models import PitchingStats
 from src.simulation.engine import AtBatResult, SimulationEngine
 from src.simulation.game_state import BaseState
 from src.simulation.outcomes import AtBatOutcome
+from src.game.fatigue import FatigueState, calculate_fatigue, update_fatigue_state, FatigueConfig
+from src.game.substitutions import SubstitutionManager
 
 from .state import GameState, InningHalf
 from .team import Lineup
 
 if TYPE_CHECKING:
     from .team import Team
+
+
+def apply_fatigue_modifier(
+    pitching_stats: PitchingStats,
+    fatigue: float,
+) -> PitchingStats:
+    """Create modified pitching stats accounting for fatigue.
+
+    Fatigue increases opponent offensive outcomes proportionally:
+    - hits_allowed = base_hits * (1 + fatigue * 0.5)  # Up to 50% more hits at max fatigue
+    - walks = base_walks * (1 + fatigue * 0.3)  # Up to 30% more walks
+    - home_runs = base_hrs * (1 + fatigue * 0.4)  # Up to 40% more HRs
+
+    Args:
+        pitching_stats: Original pitching stats
+        fatigue: Fatigue value 0.0-1.0
+
+    Returns:
+        New PitchingStats with fatigue adjustments applied
+    """
+    # Use dataclasses.replace to create modified copy
+    from dataclasses import replace
+    return replace(
+        pitching_stats,
+        hits_allowed=int(pitching_stats.hits_allowed * (1 + fatigue * 0.5)),
+        walks_allowed=int(pitching_stats.walks_allowed * (1 + fatigue * 0.3)),
+        home_runs_allowed=int(pitching_stats.home_runs_allowed * (1 + fatigue * 0.4)),
+    )
 
 
 def transition_half_inning(state: GameState) -> GameState:
@@ -114,15 +144,18 @@ class GameEngine:
         self,
         simulation_engine: Optional[SimulationEngine] = None,
         repository: Optional[LahmanRepository] = None,
+        substitution_manager: Optional[SubstitutionManager] = None,
     ):
         """Initialize GameEngine.
 
         Args:
             simulation_engine: SimulationEngine instance. If None, creates new one.
             repository: Optional repository for ID-based lookups.
+            substitution_manager: Optional SubstitutionManager for tracking subs.
         """
         self.sim = simulation_engine or SimulationEngine(repository=repository)
         self.repository = repository
+        self.sub_manager = substitution_manager
 
     def reset_rng(self, seed: Optional[int] = None):
         """Reset RNG for reproducible games."""
@@ -135,7 +168,7 @@ class GameEngine:
     ) -> GameState:
         """Create new state from at-bat result.
 
-        Updates outs, score, base state, and batting order.
+        Updates outs, score, base state, batting order, and pitcher fatigue.
 
         Args:
             state: Current game state.
@@ -169,6 +202,32 @@ class GameEngine:
             new_away_idx = state.away_batting_index
             new_home_idx = (state.home_batting_index + 1) % 9
 
+        # Update pitcher fatigue
+        current_fatigue = state.current_pitcher_fatigue
+        # Determine batter's position in order for TTO tracking
+        batting_idx = (state.current_batting_index % 9) + 1  # 1-9
+        runners_on = (1 if state.base_state.first else 0) + \
+                     (1 if state.base_state.second else 0) + \
+                     (1 if state.base_state.third else 0)
+        close_game = abs(state.away_score - state.home_score) <= 2
+
+        new_fatigue = update_fatigue_state(
+            current_fatigue,
+            batters_in_order=batting_idx,
+            runners_on=runners_on,
+            close_game=close_game,
+        )
+
+        # Determine which pitcher fatigue to update
+        if state.half == InningHalf.TOP:
+            # Home team is fielding
+            new_away_fatigue = state.away_pitcher_fatigue
+            new_home_fatigue = new_fatigue
+        else:
+            # Away team is fielding
+            new_away_fatigue = new_fatigue
+            new_home_fatigue = state.home_pitcher_fatigue
+
         return dataclass_replace(
             state,
             outs=new_outs,
@@ -177,6 +236,8 @@ class GameEngine:
             home_score=new_home,
             away_batting_index=new_away_idx,
             home_batting_index=new_home_idx,
+            away_pitcher_fatigue=new_away_fatigue,
+            home_pitcher_fatigue=new_home_fatigue,
         )
 
     def simulate_half_inning(
