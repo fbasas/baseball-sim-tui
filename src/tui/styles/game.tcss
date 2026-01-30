@@ -44,6 +44,7 @@ Screen {
 #play-log {
     border: solid $secondary;
     padding: 0 1;
+    background: $surface;
 }
 
 /* Right column: Home lineup */
