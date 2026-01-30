@@ -8,11 +8,19 @@ Widgets:
     SituationWidget: Panel showing inning, outs, and base runners.
     LineupCard: Batting lineup display with current batter highlighting.
     PlayByPlayLog: Scrolling log of play-by-play descriptions.
+    FatigueWidget: Pitcher fatigue meter with color-coded visual bar.
 """
 
 from .boxscore import BoxscoreWidget
+from .fatigue_widget import FatigueWidget
 from .lineup_card import LineupCard
 from .play_log import PlayByPlayLog
 from .situation import SituationWidget
 
-__all__ = ["BoxscoreWidget", "SituationWidget", "LineupCard", "PlayByPlayLog"]
+__all__ = [
+    "BoxscoreWidget",
+    "SituationWidget",
+    "LineupCard",
+    "PlayByPlayLog",
+    "FatigueWidget",
+]
