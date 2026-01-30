@@ -9,18 +9,18 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 
 ## Current Position
 
-Phase: 3 of 5 (Minimal Playable TUI) - COMPLETE
-Plan: 4 of 4 in current phase - COMPLETE
-Status: Phase verified
-Last activity: 2026-01-29 - Completed 03-04-PLAN.md (End game and controls)
+Phase: 4 of 5 (Substitutions & Advanced Mechanics)
+Plan: 2 of 5 in current phase
+Status: In progress
+Last activity: 2026-01-30 - Completed 04-02-PLAN.md (Substitution tracking)
 
-Progress: [██████████] 100% (14 of 14 plans)
+Progress: [███████████░░░░░░░░] 78% (15 of 19 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
-- Average duration: 4.6 min
+- Total plans completed: 15
+- Average duration: 4.5 min
 - Total execution time: 1.1 hours
 
 **By Phase:**
@@ -30,9 +30,10 @@ Progress: [██████████] 100% (14 of 14 plans)
 | 01    | 6     | 42 min | 7.0 min  |
 | 02    | 4     | 11 min | 2.8 min  |
 | 03    | 4     | 15 min | 3.8 min  |
+| 04    | 1     | 3 min  | 3.0 min  |
 
 **Recent Trend:**
-- Last 5 plans: 02-04 (3 min), 03-01 (2 min), 03-02 (2 min), 03-03 (3 min), 03-04 (8 min)
+- Last 5 plans: 03-01 (2 min), 03-02 (2 min), 03-03 (3 min), 03-04 (8 min), 04-02 (3 min)
 - Trend: Maintaining fast execution velocity
 
 *Updated after each plan completion*
@@ -86,6 +87,11 @@ Recent decisions affecting current work:
 - Year in team display: Show "1927 Yankees" for clarity (03-04)
 - Runs only in boxscore: Simplified display, hits deferred to later phase (03-04)
 - ModalScreen with callback: EndGameMenu returns button ID for handler (03-04)
+- Frozen dataclass for SubstitutionRecord: Ensures immutability of historical records (04-02)
+- Set-based player tracking: O(1) lookup for removed_players availability checks (04-02)
+- Tuple validation pattern: (bool, str) return for clear error messaging (04-02)
+- Infer team from InningHalf: DH forfeiture uses game state context (04-02)
+- Separate history from removed_players: Clear separation of concerns (04-02)
 
 ### Pending Todos
 
@@ -97,6 +103,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-01-29 (03-04 execution)
-Stopped at: Completed Phase 3 - Minimal Playable TUI
+Last session: 2026-01-30 (04-02 execution)
+Stopped at: Completed 04-02-PLAN.md (Substitution tracking)
 Resume file: None
