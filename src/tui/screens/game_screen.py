@@ -15,12 +15,15 @@ from textual.timer import Timer
 
 from src.data.lahman import LahmanRepository
 from src.game.engine import GameEngine, check_game_complete, transition_half_inning
+from src.game.fatigue import FatigueState, update_fatigue_state
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
+from src.game.substitutions import SubstitutionManager, SubstitutionRecord, SubstitutionType
 from src.game.team import Team, create_lineup
 from src.simulation.engine import AtBatResult
 
-from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget
+from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget, FatigueWidget
+from .substitution_menu import SubstitutionMenu
 
 # Database path relative to this file (src/tui/screens/ -> project root -> data/)
 _DB_PATH = Path(__file__).parent.parent.parent.parent / "data" / "lahman.sqlite"
@@ -60,6 +63,7 @@ class GameScreen(Screen):
         self.home_hits = 0
         self._current_half_inning: Tuple[int, InningHalf] = (1, InningHalf.TOP)
         self._fast_forward_timer: Optional[Timer] = None
+        self.sub_manager = SubstitutionManager()
 
     def compose(self) -> ComposeResult:
         """Compose the three-column game layout.
@@ -67,7 +71,7 @@ class GameScreen(Screen):
         Layout:
         - Top: BoxscoreWidget (team names and scores)
         - Left: Away lineup card
-        - Center: Situation + Play log
+        - Center: Fatigue + Situation + Play log
         - Right: Home lineup card
 
         Yields:
@@ -76,6 +80,7 @@ class GameScreen(Screen):
         yield BoxscoreWidget()
         yield LineupCard("Away", self._placeholder_lineup(), "away-lineup")
         with Container(id="center-panel"):
+            yield FatigueWidget()
             yield SituationWidget()
             yield PlayByPlayLog()
         yield LineupCard("Home", self._placeholder_lineup(), "home-lineup")
@@ -109,7 +114,10 @@ class GameScreen(Screen):
                 self._create_team_lineup(self.home_team)
 
                 self.engine = GameEngine()
-                self.game_state = GameState()
+                self.game_state = GameState(
+                    away_pitcher_id=self.away_team.lineup.starting_pitcher_id,
+                    home_pitcher_id=self.home_team.lineup.starting_pitcher_id,
+                )
 
                 # Update widgets with real data
                 self._update_lineup_cards()
@@ -233,6 +241,39 @@ class GameScreen(Screen):
         else:
             self.query_one("#away-lineup", LineupCard).set_current_batter(-1)
             self.query_one("#home-lineup", LineupCard).set_current_batter(state.home_batting_index)
+
+        # Update fatigue widget
+        self._update_fatigue_widget()
+
+    def _update_fatigue_widget(self) -> None:
+        """Update fatigue widget with current pitcher info."""
+        state = self.game_state
+
+        # Determine current pitcher based on which half of inning
+        if state.half == InningHalf.TOP:
+            # Home team is pitching
+            pitcher_id = state.home_pitcher_id
+            pitching_team = self.home_team
+            fatigue = state.home_fatigue
+        else:
+            # Away team is pitching
+            pitcher_id = state.away_pitcher_id
+            pitching_team = self.away_team
+            fatigue = state.away_fatigue
+
+        # Get pitcher name
+        if pitching_team and pitcher_id:
+            player = pitching_team.get_player(pitcher_id)
+            if player:
+                pitcher_name = f"{player.name_first[0]}. {player.name_last}"
+            else:
+                pitcher_name = pitcher_id
+        else:
+            pitcher_name = "Unknown"
+
+        # Update widget
+        fatigue_widget = self.query_one(FatigueWidget)
+        fatigue_widget.update_fatigue(pitcher_name, fatigue)
 
     def _get_runner_names(self) -> Dict[str, str]:
         """Get runner names for situation display.
