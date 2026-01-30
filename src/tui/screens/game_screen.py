@@ -4,6 +4,7 @@ This module provides the GameScreen that orchestrates the game dashboard,
 loading teams, managing game state, and updating all widgets reactively.
 """
 
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -549,7 +550,111 @@ class GameScreen(Screen):
         Args:
             result: Tuple of (sub_type, player_out_id, player_in_id) or None if cancelled.
         """
-        # Placeholder - will be implemented in Task 3
-        if result:
-            log = self.query_one(PlayByPlayLog)
-            log.add_play("[italic]Substitution placeholder - not yet implemented[/italic]")
+        if not result:
+            return  # User cancelled
+
+        sub_type, player_out_id, player_in_id = result
+        state = self.game_state
+        log = self.query_one(PlayByPlayLog)
+
+        # Determine which team is making the substitution
+        if state.half == InningHalf.TOP:
+            # Away batting, Home pitching
+            fielding_team = self.home_team
+            batting_team = self.away_team
+        else:
+            # Home batting, Away pitching
+            fielding_team = self.away_team
+            batting_team = self.home_team
+
+        if sub_type == "pitching_change":
+            # Get new pitcher name for log
+            player = fielding_team.get_player(player_in_id)
+            if player:
+                pitcher_name = f"{player.name_first[0]}. {player.name_last}"
+            else:
+                pitcher_name = player_in_id
+
+            # Update pitcher ID in game state and reset fatigue
+            if state.half == InningHalf.TOP:
+                # Home team is pitching
+                self.game_state = dataclass_replace(
+                    state,
+                    home_pitcher_id=player_in_id,
+                    home_fatigue=FatigueState()  # Fresh pitcher
+                )
+            else:
+                # Away team is pitching
+                self.game_state = dataclass_replace(
+                    state,
+                    away_pitcher_id=player_in_id,
+                    away_fatigue=FatigueState()  # Fresh pitcher
+                )
+
+            # Record substitution in manager
+            record = SubstitutionRecord(
+                inning=state.inning,
+                half=state.half,
+                player_out=player_out_id,
+                player_in=player_in_id,
+                sub_type=SubstitutionType.PITCHING_CHANGE,
+            )
+            self.sub_manager.make_substitution(record)
+
+            # Add narrative to log
+            log.add_play("")
+            log.add_play(f"[bold]Manager makes a pitching change: {pitcher_name} now pitching[/bold]")
+            log.add_play("")
+
+        elif sub_type == "pinch_hitter":
+            # Get new batter name for log
+            player = batting_team.get_player(player_in_id)
+            if player:
+                batter_name = f"{player.name_first[0]}. {player.name_last}"
+            else:
+                batter_name = player_in_id
+
+            # Find the lineup slot to replace
+            if state.half == InningHalf.TOP:
+                current_index = state.away_batting_index
+            else:
+                current_index = state.home_batting_index
+
+            lineup_slot = batting_team.lineup.get_batter(current_index)
+
+            # Get the new player's stats
+            new_batting_stats = batting_team.batting_stats.get(player_in_id)
+            if not new_batting_stats:
+                return  # Can't substitute without stats
+
+            # Update the lineup slot with new player
+            # We need to update the slot in the lineup
+            from dataclasses import replace as dc_replace
+            new_slot = dc_replace(
+                lineup_slot,
+                player_id=player_in_id,
+                batting_stats=new_batting_stats,
+            )
+
+            # Replace the slot in the lineup's slots list
+            new_slots = list(batting_team.lineup.slots)
+            new_slots[current_index] = new_slot
+            batting_team.lineup.slots = new_slots
+
+            # Record substitution in manager
+            record = SubstitutionRecord(
+                inning=state.inning,
+                half=state.half,
+                player_out=player_out_id,
+                player_in=player_in_id,
+                sub_type=SubstitutionType.PINCH_HITTER,
+            )
+            self.sub_manager.make_substitution(record)
+
+            # Add narrative to log
+            log.add_play("")
+            log.add_play(f"[bold]Pinch hitter: {batter_name} batting for {lineup_slot.player_id}[/bold]")
+            log.add_play("")
+
+            # Refresh lineup cards to show new batter
+            self._update_lineup_cards()

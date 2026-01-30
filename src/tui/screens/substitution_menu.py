@@ -9,14 +9,25 @@ from typing import List, Optional, Tuple
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static, TabbedContent, TabPane
+
+
+class PlayerSelected(Message):
+    """Message sent when a player is clicked."""
+
+    def __init__(self, player_id: str, widget_id: str) -> None:
+        super().__init__()
+        self.player_id = player_id
+        self.widget_id = widget_id
 
 
 class PlayerListItem(Static):
     """Single player in the substitution list.
 
     Shows player name and stats, grayed out if already used.
+    Focusable and clickable for selection.
     """
 
     def __init__(
@@ -38,6 +49,17 @@ class PlayerListItem(Static):
             return f"{self._name:<15} {self._stats}"
         else:
             return f"[dim]{self._name:<15} {self._stats} (Used)[/dim]"
+
+    def on_mount(self) -> None:
+        """Make item focusable for keyboard navigation."""
+        if self._available:
+            self.can_focus = True
+
+    def on_click(self) -> None:
+        """Handle click to select this player."""
+        if self._available:
+            # Notify parent screen of selection
+            self.post_message(PlayerSelected(self.player_id, self.id or ""))
 
 
 class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
@@ -99,13 +121,35 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
                 yield Button("Confirm", id="confirm", variant="primary")
                 yield Button("Cancel", id="cancel", variant="default")
 
+    def on_player_selected(self, message: PlayerSelected) -> None:
+        """Handle player selection click.
+
+        Args:
+            message: PlayerSelected message with player_id and widget_id
+        """
+        # Determine if this is a pitcher or batter based on widget ID prefix
+        if message.widget_id.startswith("p-"):
+            self._selected_pitcher = message.player_id
+        elif message.widget_id.startswith("b-"):
+            self._selected_batter = message.player_id
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
             self.dismiss(None)
         elif event.button.id == "confirm":
-            # Return selected substitution
-            # For now, basic implementation - full selection logic in next plan
-            self.dismiss(None)
+            # Determine which tab is active and return appropriate substitution
+            tabbed = self.query_one(TabbedContent)
+            active_tab = tabbed.active
+
+            if active_tab == "pitching-tab" and self._selected_pitcher:
+                # Pitching change
+                self.dismiss(("pitching_change", self._current_pitcher, self._selected_pitcher))
+            elif active_tab == "batter-tab" and self._selected_batter:
+                # Pinch hitter
+                self.dismiss(("pinch_hitter", self._current_batter, self._selected_batter))
+            else:
+                # No selection made - do nothing
+                self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
