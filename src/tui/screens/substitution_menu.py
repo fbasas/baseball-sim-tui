@@ -8,7 +8,7 @@ Provides a unified interface for all substitution types:
 from typing import List, Optional, Tuple
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static
@@ -71,51 +71,57 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     sub_type is 'pitching_change' or 'pinch_hitter'.
     """
 
-    DEFAULT_CSS = """
+    CSS = """
     SubstitutionMenu {
         align: center middle;
+        layout: horizontal;
     }
 
-    SubstitutionMenu > Vertical {
-        width: 60;
-        min-width: 60;
-        height: 18;
+    #sub-menu-container {
+        width: 50vw;
+        min-width: 50;
+        height: 20;
         background: $surface;
-        border: solid $primary;
+        border: thick $primary;
         padding: 1 2;
     }
 
-    SubstitutionMenu #sub-title {
+    #sub-title {
         text-align: center;
-        margin-bottom: 1;
+        width: 100%;
+        height: 1;
     }
 
-    SubstitutionMenu #pitcher-list, SubstitutionMenu #batter-list {
-        height: auto;
-        max-height: 12;
-        overflow-y: auto;
-        padding: 1;
+    #pitcher-list {
+        height: 10;
+        width: 100%;
+        border: solid $primary-darken-2;
+        margin: 1 0;
     }
 
-    SubstitutionMenu PlayerListItem {
-        padding: 0 1;
-    }
-
-    SubstitutionMenu PlayerListItem:hover {
-        background: $primary-darken-2;
-    }
-
-    SubstitutionMenu PlayerListItem:focus {
-        background: $accent;
-    }
-
-    SubstitutionMenu #sub-buttons {
-        margin-top: 1;
+    #button-row {
+        width: 100%;
+        height: 3;
         align: center middle;
     }
 
-    SubstitutionMenu #sub-buttons Button {
-        margin: 0 1;
+    #button-row Button {
+        width: auto;
+        min-width: 12;
+        margin: 0 2;
+    }
+
+    PlayerListItem {
+        width: 100%;
+        padding: 0 1;
+    }
+
+    PlayerListItem:hover {
+        background: $primary-darken-2;
+    }
+
+    PlayerListItem:focus {
+        background: $accent;
     }
     """
 
@@ -148,20 +154,14 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         self._selected_batter: Optional[str] = None
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="sub-menu-container"):
+        with Container(id="sub-menu-container"):
             yield Label("[bold]═══ SUBSTITUTIONS ═══[/bold]", id="sub-title")
-            yield Label("")
-            with Horizontal(id="tab-buttons"):
-                yield Button("Pitching Change", id="tab-pitching", variant="primary")
-                yield Button("Pinch Hitter", id="tab-batter", variant="default")
-            yield Label("")
             yield Label("[bold]Available Relievers:[/bold]")
-            with Vertical(id="pitcher-list"):
+            with VerticalScroll(id="pitcher-list"):
                 for pid, name, era, avail in self._pitchers:
                     stats = f"ERA {era:.2f}"
                     yield PlayerListItem(pid, name, stats, avail, id=f"p-{pid}")
-            yield Label("")
-            with Horizontal(id="sub-buttons"):
+            with Horizontal(id="button-row"):
                 yield Button("Confirm", id="confirm", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
 
