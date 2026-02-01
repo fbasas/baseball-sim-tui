@@ -1,14 +1,18 @@
 ---
-status: complete
+status: testing
 phase: 04-substitutions-advanced-mechanics
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md]
 started: 2026-01-29T16:00:00Z
-updated: 2026-01-31T00:00:00Z
+updated: 2026-01-31T01:00:00Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 6
+name: Removed Pitcher Cannot Re-Enter
+expected: |
+  After making a pitching change, press 'S' again. The previously-removed starting pitcher should NOT be available in the list.
+awaiting: user response
 
 ## Tests
 
@@ -31,27 +35,24 @@ result: pass
 
 ### 5. Make Pitching Change
 expected: Select a pitcher from the list. The pitching change executes: fatigue resets to 0%, new pitcher name appears in fatigue widget, play log shows substitution message.
-result: issue
-reported: "TypeError: SubstitutionRecord.__init__() got an unexpected keyword argument 'player_out'"
-severity: blocker
+result: pass
+notes: "Fixed via commits e1c906b, a271af4, 7c59134 - parameter names, required fields, method name"
 
 ### 6. Removed Pitcher Cannot Re-Enter
 expected: After making a pitching change, press 'S' again. The previously-removed starting pitcher should NOT be available in the list.
-result: skipped
-reason: blocked by test 5
+result: [pending]
 
 ### 7. Complete Game with Substitutions
 expected: Play through a complete game making at least one pitching change. Game ends normally with final score displayed.
-result: skipped
-reason: blocked by test 5
+result: [pending]
 
 ## Summary
 
 total: 7
-passed: 4
-issues: 1
-pending: 0
-skipped: 2
+passed: 5
+issues: 0
+pending: 2
+skipped: 0
 
 ## Gaps
 
