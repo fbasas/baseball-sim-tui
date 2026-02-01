@@ -611,7 +611,7 @@ class GameScreen(Screen):
                 new_position=Position.PITCHER,
                 batting_order_slot=0,  # Pitcher not in DH batting order
             )
-            self.sub_manager.make_substitution(record)
+            self.sub_manager.record_substitution(record)
 
             # Add narrative to log
             log.add_play("")
@@ -664,7 +664,7 @@ class GameScreen(Screen):
                 new_position=None,
                 batting_order_slot=current_index,
             )
-            self.sub_manager.make_substitution(record)
+            self.sub_manager.record_substitution(record)
 
             # Add narrative to log
             log.add_play("")

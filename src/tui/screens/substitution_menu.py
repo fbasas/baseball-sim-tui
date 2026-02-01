@@ -30,6 +30,10 @@ class PlayerListItem(Static):
     Focusable and clickable for selection.
     """
 
+    BINDINGS = [
+        ("enter", "select", "Select"),
+    ]
+
     def __init__(
         self,
         player_id: str,
@@ -59,6 +63,11 @@ class PlayerListItem(Static):
         """Handle click to select this player."""
         if self._available:
             # Notify parent screen of selection
+            self.post_message(PlayerSelected(self.player_id, self.id or ""))
+
+    def action_select(self) -> None:
+        """Handle Enter key to select this player."""
+        if self._available:
             self.post_message(PlayerSelected(self.player_id, self.id or ""))
 
 
@@ -127,6 +136,7 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
+        ("c", "confirm", "Confirm"),
     ]
 
     def __init__(
@@ -183,10 +193,30 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
             self.dismiss(None)
         elif event.button.id == "confirm":
             # For now, only support pitching changes
-            if self._selected_pitcher:
-                self.dismiss(("pitching_change", self._current_pitcher, self._selected_pitcher))
+            # If no pitcher selected, auto-select first available
+            selected = self._selected_pitcher
+            if not selected:
+                for pid, name, era, avail in self._pitchers:
+                    if avail:
+                        selected = pid
+                        break
+            if selected:
+                self.dismiss(("pitching_change", self._current_pitcher, selected))
             else:
                 self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_confirm(self) -> None:
+        """Confirm substitution with C key."""
+        selected = self._selected_pitcher
+        if not selected:
+            for pid, name, era, avail in self._pitchers:
+                if avail:
+                    selected = pid
+                    break
+        if selected:
+            self.dismiss(("pitching_change", self._current_pitcher, selected))
+        else:
+            self.dismiss(None)
