@@ -604,8 +604,8 @@ class GameScreen(Screen):
             record = SubstitutionRecord(
                 inning=state.inning,
                 half=state.half,
-                player_out=player_out_id,
-                player_in=player_in_id,
+                player_out_id=player_out_id,
+                player_in_id=player_in_id,
                 sub_type=SubstitutionType.PITCHING_CHANGE,
             )
             self.sub_manager.make_substitution(record)
@@ -654,8 +654,8 @@ class GameScreen(Screen):
             record = SubstitutionRecord(
                 inning=state.inning,
                 half=state.half,
-                player_out=player_out_id,
-                player_in=player_in_id,
+                player_out_id=player_out_id,
+                player_in_id=player_in_id,
                 sub_type=SubstitutionType.PINCH_HITTER,
             )
             self.sub_manager.make_substitution(record)

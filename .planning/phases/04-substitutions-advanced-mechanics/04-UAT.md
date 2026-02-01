@@ -64,14 +64,16 @@ skipped: 2
   resolution: "commit 21fd236 - fix(ui): properly size SubstitutionMenu modal"
 
 - truth: "Pitching change executes successfully: fatigue resets to 0%, new pitcher name appears in fatigue widget, play log shows substitution message"
-  status: failed
+  status: resolved
   reason: "User reported: TypeError: SubstitutionRecord.__init__() got an unexpected keyword argument 'player_out'"
   severity: blocker
   test: 5
-  root_cause: ""
-  artifacts: []
+  root_cause: "game_screen.py used wrong parameter names (player_out, player_in) but SubstitutionRecord expects (player_out_id, player_in_id)"
+  artifacts:
+    - path: "src/tui/screens/game_screen.py"
+      issue: "Wrong parameter names in SubstitutionRecord constructor calls (lines 607-608, 657-658)"
   missing: []
-  debug_session: ""
+  resolution: "Renamed player_out to player_out_id and player_in to player_in_id"
 
 ## Future Enhancements
 
