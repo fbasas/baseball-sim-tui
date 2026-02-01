@@ -607,6 +607,9 @@ class GameScreen(Screen):
                 player_out_id=player_out_id,
                 player_in_id=player_in_id,
                 sub_type=SubstitutionType.PITCHING_CHANGE,
+                old_position=Position.PITCHER,
+                new_position=Position.PITCHER,
+                batting_order_slot=0,  # Pitcher not in DH batting order
             )
             self.sub_manager.make_substitution(record)
 
@@ -657,6 +660,9 @@ class GameScreen(Screen):
                 player_out_id=player_out_id,
                 player_in_id=player_in_id,
                 sub_type=SubstitutionType.PINCH_HITTER,
+                old_position=None,  # Pinch hitter doesn't affect fielding
+                new_position=None,
+                batting_order_slot=current_index,
             )
             self.sub_manager.make_substitution(record)
 
