@@ -1,18 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 04-substitutions-advanced-mechanics
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md]
 started: 2026-01-29T16:00:00Z
-updated: 2026-01-29T17:30:00Z
+updated: 2026-01-31T00:00:00Z
 ---
 
 ## Current Test
 
-number: 4
-name: Available Pitchers Listed in Menu
-expected: |
-  The substitution menu shows a list of available relief pitchers with their stats. Used pitchers should NOT appear (no re-entry rule).
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -31,27 +27,31 @@ notes: "Fixed - was too narrow due to ModalScreen layout:vertical default. Fixed
 
 ### 4. Available Pitchers Listed in Menu
 expected: The substitution menu shows a list of available relief pitchers with their stats. Used pitchers should NOT appear (no re-entry rule).
-result: [pending]
+result: pass
 
 ### 5. Make Pitching Change
 expected: Select a pitcher from the list. The pitching change executes: fatigue resets to 0%, new pitcher name appears in fatigue widget, play log shows substitution message.
-result: [pending]
+result: issue
+reported: "TypeError: SubstitutionRecord.__init__() got an unexpected keyword argument 'player_out'"
+severity: blocker
 
 ### 6. Removed Pitcher Cannot Re-Enter
 expected: After making a pitching change, press 'S' again. The previously-removed starting pitcher should NOT be available in the list.
-result: [pending]
+result: skipped
+reason: blocked by test 5
 
 ### 7. Complete Game with Substitutions
 expected: Play through a complete game making at least one pitching change. Game ends normally with final score displayed.
-result: [pending]
+result: skipped
+reason: blocked by test 5
 
 ## Summary
 
 total: 7
-passed: 3
-issues: 0
-pending: 4
-skipped: 0
+passed: 4
+issues: 1
+pending: 0
+skipped: 2
 
 ## Gaps
 
@@ -62,6 +62,16 @@ skipped: 0
   test: 3
   root_cause: "ModalScreen default CSS uses layout:vertical which constrained child width. Fixed by overriding to layout:horizontal and using viewport units (50vw)."
   resolution: "commit 21fd236 - fix(ui): properly size SubstitutionMenu modal"
+
+- truth: "Pitching change executes successfully: fatigue resets to 0%, new pitcher name appears in fatigue widget, play log shows substitution message"
+  status: failed
+  reason: "User reported: TypeError: SubstitutionRecord.__init__() got an unexpected keyword argument 'player_out'"
+  severity: blocker
+  test: 5
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
 
 ## Future Enhancements
 
