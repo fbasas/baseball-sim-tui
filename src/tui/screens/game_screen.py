@@ -71,6 +71,14 @@ class GameScreen(Screen):
         self._player_hit_counts: Dict[str, int] = {}
         self._pitcher_consecutive_retired: int = 0
         self._inning_runs: int = 0
+        # Box score stat tracking
+        self._batting_lines: Dict[str, Dict[str, int]] = {}
+        self._pitching_lines: Dict[str, Dict[str, int]] = {}
+        self._inning_scores: List[Tuple[int, int]] = []
+        self._away_errors: int = 0
+        self._home_errors: int = 0
+        self._current_inning_away_runs: int = 0
+        self._current_inning_home_runs: int = 0
 
     def compose(self) -> ComposeResult:
         """Compose the three-column game layout.
@@ -171,11 +179,24 @@ class GameScreen(Screen):
             home_pitcher_id=self.home_team.lineup.starting_pitcher_id,
         )
 
+        # Initialize stat tracking for box score
+        self._init_stat_lines()
+
         self._update_lineup_cards()
         self._update_all_widgets()
 
         log = self.query_one(PlayByPlayLog)
         log.add_inning_divider(1, True)
+
+    def _init_stat_lines(self) -> None:
+        """Initialize batting and pitching stat lines for all lineup players."""
+        zero_bat = lambda: {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
+        zero_pitch = lambda: {"outs": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "K": 0}
+
+        for team in (self.away_team, self.home_team):
+            for slot in team.lineup.slots:
+                self._batting_lines[slot.player_id] = zero_bat()
+            self._pitching_lines[team.lineup.starting_pitcher_id] = zero_pitch()
 
     def _update_lineup_cards(self) -> None:
         """Update lineup card widgets with real team data."""
@@ -326,6 +347,14 @@ class GameScreen(Screen):
             summary = generate_inning_summary(prev_team_name, self._inning_runs, prev_inning, prev_half)
             log.add_play(f"[italic]{summary}[/italic]")
             self._inning_runs = 0
+
+            # Record inning scores for box score
+            if prev_half == InningHalf.BOTTOM:
+                # End of a full inning — record both halves
+                self._inning_scores.append((self._current_inning_away_runs, self._current_inning_home_runs))
+                self._current_inning_away_runs = 0
+                self._current_inning_home_runs = 0
+
             log.add_inning_divider(state.inning, state.half == InningHalf.TOP)
             self._current_half_inning = current_half
 
@@ -442,29 +471,111 @@ class GameScreen(Screen):
         else:
             log.add_play(text)
 
-    def _show_game_over(self) -> None:
-        """Show game over message and end-game menu.
+        # --- Box score stat accumulation ---
+        outcome = result.outcome
 
-        Logs final score to play log and pushes EndGameMenu modal
-        for user to choose replay, new game, or quit.
-        """
-        log = self.query_one(PlayByPlayLog)
+        # Batting line
+        if player_id not in self._batting_lines:
+            self._batting_lines[player_id] = {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
+        bl = self._batting_lines[player_id]
+
+        # AB: not counted for BB, HBP, SAC_FLY, SAC_HIT
+        no_ab = {AtBatOutcome.WALK, AtBatOutcome.HIT_BY_PITCH,
+                 AtBatOutcome.SACRIFICE_FLY, AtBatOutcome.SACRIFICE_HIT}
+        if outcome not in no_ab:
+            bl["AB"] += 1
+        if outcome.is_hit:
+            bl["H"] += 1
+        if outcome == AtBatOutcome.WALK:
+            bl["BB"] += 1
+        if outcome.is_strikeout:
+            bl["K"] += 1
+        bl["RBI"] += result.runs_scored
+
+        # Pitching line
+        if pitcher_id not in self._pitching_lines:
+            self._pitching_lines[pitcher_id] = {"outs": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "K": 0}
+        pl = self._pitching_lines[pitcher_id]
+        if outcome == AtBatOutcome.GIDP:
+            pl["outs"] += 2
+        elif outcome.is_out:
+            pl["outs"] += 1
+        if outcome.is_hit:
+            pl["H"] += 1
+        pl["R"] += result.runs_scored
+        pl["ER"] += result.runs_scored  # Treat all as earned for simplicity
+        if outcome in {AtBatOutcome.WALK, AtBatOutcome.HIT_BY_PITCH}:
+            pl["BB"] += 1
+        if outcome.is_strikeout:
+            pl["K"] += 1
+
+        # Error tracking
+        if outcome == AtBatOutcome.REACHED_ON_ERROR:
+            if state.half == InningHalf.TOP:
+                self._home_errors += 1  # Home team is fielding
+            else:
+                self._away_errors += 1
+
+        # Track inning runs per side
+        if result.runs_scored > 0:
+            if state.half == InningHalf.TOP:
+                self._current_inning_away_runs += result.runs_scored
+            else:
+                self._current_inning_home_runs += result.runs_scored
+
+    def _show_game_over(self) -> None:
+        """Show full-screen box score at game's end."""
+        from .box_score_screen import BoxScoreScreen
+
         state = self.game_state
-        log.add_play("")
-        log.add_play("=== GAME OVER ===")
+
+        # Finalize last inning scores
+        self._inning_scores.append((self._current_inning_away_runs, self._current_inning_home_runs))
+
         away_name = self.away_team.info.team_name if self.away_team else "Away"
         home_name = self.home_team.info.team_name if self.home_team else "Home"
-        log.add_play(f"Final: {away_name} {state.away_score} - {home_name} {state.home_score}")
 
-        # Push end game menu
-        from .end_game_menu import EndGameMenu
+        # Build batting data ordered by lineup position
+        def _build_batting(team):
+            lines = []
+            for slot in team.lineup.slots:
+                p = team.get_player(slot.player_id)
+                name = p.name_last if p else slot.player_id
+                pos = slot.position.abbreviation if hasattr(slot.position, 'abbreviation') else 'DH'
+                stats = self._batting_lines.get(slot.player_id, {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0})
+                lines.append((f"{name} {pos.lower()}", stats))
+            return lines
+
+        # Build pitching data
+        def _build_pitching(team, is_winner):
+            lines = []
+            for pid, stats in self._pitching_lines.items():
+                if pid in team.pitching_stats:
+                    p = team.get_player(pid)
+                    name = p.name_last if p else pid
+                    lines.append((name, stats, is_winner))
+            return lines
+
+        away_won = state.away_score > state.home_score
+
         self.app.push_screen(
-            EndGameMenu(
-                winner="away" if state.away_score > state.home_score else "home",
+            BoxScoreScreen(
+                away_team_name=away_name,
+                home_team_name=home_name,
                 away_score=state.away_score,
                 home_score=state.home_score,
+                away_hits=self.away_hits,
+                home_hits=self.home_hits,
+                away_errors=self._away_errors,
+                home_errors=self._home_errors,
+                inning_scores=self._inning_scores,
+                away_batting=_build_batting(self.away_team),
+                home_batting=_build_batting(self.home_team),
+                away_pitching=_build_pitching(self.away_team, away_won),
+                home_pitching=_build_pitching(self.home_team, not away_won),
+                winner="away" if away_won else "home",
             ),
-            self._handle_end_game_choice
+            self._handle_end_game_choice,
         )
 
     def _handle_end_game_choice(self, choice: Optional[str]) -> None:
@@ -492,6 +603,13 @@ class GameScreen(Screen):
         self._player_hit_counts = {}
         self._pitcher_consecutive_retired = 0
         self._inning_runs = 0
+        self._batting_lines = {}
+        self._pitching_lines = {}
+        self._inning_scores = []
+        self._away_errors = 0
+        self._home_errors = 0
+        self._current_inning_away_runs = 0
+        self._current_inning_home_runs = 0
 
         # Clear play log and add opening divider
         log = self.query_one(PlayByPlayLog)
