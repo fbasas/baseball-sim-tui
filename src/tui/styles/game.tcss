@@ -1,4 +1,5 @@
 /* Baseball Simulation TUI - Game Dashboard Layout */
+/* Classic baseball color theme: dark green field, cream panels, brown borders, gold accents */
 
 /* Main screen uses 3-column grid */
 Screen {
@@ -6,6 +7,7 @@ Screen {
     grid-size: 3;
     grid-columns: 1fr 2fr 1fr;
     grid-rows: auto 1fr;
+    background: #1a3a1a;
 }
 
 /* Boxscore spans full width at top */
@@ -13,51 +15,63 @@ Screen {
     column-span: 3;
     height: 3;
     dock: top;
-    border: solid $primary;
+    border: heavy #8b4513;
     padding: 0 1;
+    background: #2d5a1b;
+    color: #fffdd0;
 }
 
 /* Score change highlight */
 #boxscore.score-changed {
-    background: $warning;
+    background: #ffd700;
+    color: #1a3a1a;
 }
 
 /* Left column: Away lineup */
 #away-lineup {
     row-span: 1;
-    border: solid $secondary;
+    border: tall #8b4513;
     padding: 1;
+    background: #f5f0dc;
+    color: #2c1810;
 }
 
 /* Center column: Situation + Play log */
 #center-panel {
     row-span: 1;
     layout: vertical;
+    background: #1a3a1a;
 }
 
 #situation {
-    height: 5;
-    border: solid $secondary;
+    height: 9;
+    border: double #ffd700;
     padding: 1;
+    background: #2d5a1b;
+    color: #fffdd0;
 }
 
 #play-log {
-    border: solid $secondary;
+    border: round #4a7c3f;
     padding: 0 1;
-    background: $surface;
+    background: #0d1f0d;
+    color: #fffdd0;
     overflow-x: hidden;
 }
 
 /* Right column: Home lineup */
 #home-lineup {
     row-span: 1;
-    border: solid $secondary;
+    border: tall #8b4513;
     padding: 1;
+    background: #f5f0dc;
+    color: #2c1810;
 }
 
 /* Current batter highlight */
 .current-batter {
-    background: $accent;
+    background: #ffd700;
+    color: #1a3a1a;
     text-style: bold;
 }
 
@@ -69,8 +83,9 @@ EndGameMenu {
 #menu {
     width: 40;
     height: auto;
-    border: thick $primary;
-    background: $surface;
+    border: thick #8b4513;
+    background: #2d5a1b;
+    color: #fffdd0;
     padding: 1 2;
 }
 
@@ -87,5 +102,19 @@ EndGameMenu {
     height: 4;
     width: 100%;
     padding: 0 1;
-    border: solid $primary-lighten-2;
+    border: solid #4a7c3f;
+    background: #1a3a1a;
+    color: #fffdd0;
+}
+
+/* Footer styling to match baseball theme */
+Footer {
+    background: #2c1810;
+    color: #fffdd0;
+}
+
+/* Header styling */
+Header {
+    background: #2c1810;
+    color: #ffd700;
 }
