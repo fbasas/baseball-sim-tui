@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 05-02-PLAN.md (TCSS baseball theme + base diamond)
-last_updated: "2026-03-14T21:04:55.618Z"
-last_activity: 2026-01-29 - Completed 04-05-PLAN.md (GameScreen integration)
+stopped_at: Completed 05-01-PLAN.md and 05-02-PLAN.md
+last_updated: "2026-03-14"
+last_activity: 2026-03-14 - Completed 05-01-PLAN.md (lineup builder + pitcher selection)
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 23
-  completed_plans: 20
-  percent: 95
+  completed_plans: 21
+  percent: 91
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 
 ## Current Position
 
-Phase: 4 of 5 (Substitutions & Advanced Mechanics) - COMPLETE
-Plan: 5 of 5 in current phase - COMPLETE (testing deferred)
-Status: Phase complete, acceptance testing deferred
-Last activity: 2026-01-29 - Completed 04-05-PLAN.md (GameScreen integration)
+Phase: 5 of 5 (Narrative Polish) - IN PROGRESS
+Plan: 2 of 4 in current phase - COMPLETE (05-01, 05-02)
+Status: Wave 1 complete, proceeding to Wave 2 (05-03 narrative engine)
+Last activity: 2026-03-14 - Completed 05-01 (lineup builder) and 05-02 (TCSS theme)
 
-Progress: [██████████████████░] 95% (19 of 19 plans, testing pending)
+Progress: [█████████████████░░] 91% (21 of 23 plans complete)
 
 ## Performance Metrics
 
@@ -124,6 +124,9 @@ Recent decisions affecting current work:
 - Simplified substitution menu: Vertical layout, pitching changes only for now (04-05)
 - [Phase 05-02]: Hex color values over Textual CSS variables: theme vars map to default palette not baseball colors
 - [Phase 05-02]: Bold yellow Rich markup for occupied bases, dim for empty: visible contrast on dark green background
+- [Phase 05-01]: Scarcity-first greedy position assignment: positions with fewer candidates assigned first
+- [Phase 05-01]: Batting order heuristic: OBP leadoff from speed positions, AVG slot 3, SLG cleanup slot 4
+- [Phase 05-01]: Pitcher selection modal: away first, then home, default to most GS
 
 ### Pending Todos
 
