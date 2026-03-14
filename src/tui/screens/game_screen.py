@@ -21,8 +21,10 @@ from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager, SubstitutionRecord, SubstitutionType
 from src.game.lineup_builder import build_lineup, get_default_starter
+from src.game.narrative import NarrativeContext, generate_inning_summary, generate_play_text, generate_substitution_text, generate_pinch_hitter_text
 from src.game.team import Team, create_lineup
 from src.simulation.engine import AtBatResult
+from src.simulation.outcomes import AtBatOutcome
 
 from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget, FatigueWidget
 from .substitution_menu import SubstitutionMenu
@@ -66,6 +68,9 @@ class GameScreen(Screen):
         self._current_half_inning: Tuple[int, InningHalf] = (1, InningHalf.TOP)
         self._fast_forward_timer: Optional[Timer] = None
         self.sub_manager = SubstitutionManager()
+        self._player_hit_counts: Dict[str, int] = {}
+        self._pitcher_consecutive_retired: int = 0
+        self._inning_runs: int = 0
 
     def compose(self) -> ComposeResult:
         """Compose the three-column game layout.
@@ -308,10 +313,19 @@ class GameScreen(Screen):
             self._show_game_over()
             return
 
-        # Check for inning change and add divider
+        # Check for inning change and add divider with inning summary
         current_half = (state.inning, state.half)
         if current_half != self._current_half_inning:
             log = self.query_one(PlayByPlayLog)
+            # Generate inning summary for the previous half
+            prev_inning, prev_half = self._current_half_inning
+            if prev_half == InningHalf.TOP:
+                prev_team_name = self.away_team.info.team_name
+            else:
+                prev_team_name = self.home_team.info.team_name
+            summary = generate_inning_summary(prev_team_name, self._inning_runs, prev_inning, prev_half)
+            log.add_play(f"[italic]{summary}[/italic]")
+            self._inning_runs = 0
             log.add_inning_divider(state.inning, state.half == InningHalf.TOP)
             self._current_half_inning = current_half
 
@@ -361,23 +375,72 @@ class GameScreen(Screen):
             self._show_game_over()
 
     def _log_play(self, result: AtBatResult, team: Team, player_id: str) -> None:
-        """Add play description to log.
+        """Add broadcaster-style narrative to play log.
 
         Args:
             result: At-bat result with outcome.
             team: Batting team for player lookup.
             player_id: Batter's player ID.
         """
+        state = self.game_state
         player = team.get_player(player_id)
-        name = player.name_last if player else player_id
+        batter_name = player.name_last if player else player_id
 
-        outcome = result.outcome.name.replace("_", " ").title()
-        runs_text = ""
-        if result.runs_scored > 0:
-            runs_text = f" ({result.runs_scored} run{'s' if result.runs_scored != 1 else ''})"
+        # Get current pitcher name
+        if state.half == InningHalf.TOP:
+            pitcher_id = state.home_pitcher_id
+            pitching_team = self.home_team
+        else:
+            pitcher_id = state.away_pitcher_id
+            pitching_team = self.away_team
+        pitcher_player = pitching_team.get_player(pitcher_id) if pitching_team else None
+        pitcher_name = pitcher_player.name_last if pitcher_player else pitcher_id
 
+        # Detect walk-off
+        is_walkoff = (
+            state.half == InningHalf.BOTTOM
+            and state.inning >= 9
+            and result.runs_scored > 0
+            and (state.home_score + result.runs_scored) > state.away_score
+        )
+
+        ctx = NarrativeContext(
+            inning=state.inning,
+            half=state.half,
+            outs=state.outs,
+            base_state=state.base_state,
+            away_score=state.away_score,
+            home_score=state.home_score,
+            batter_name=batter_name,
+            pitcher_name=pitcher_name,
+            batter_hits_today=self._player_hit_counts.get(player_id, 0),
+            pitcher_consecutive_retired=self._pitcher_consecutive_retired,
+            is_walkoff=is_walkoff,
+            runs_on_play=result.runs_scored,
+        )
+
+        text = generate_play_text(result, ctx)
+
+        # Update streak tracking
+        if result.outcome.is_hit:
+            self._player_hit_counts[player_id] = self._player_hit_counts.get(player_id, 0) + 1
+            self._pitcher_consecutive_retired = 0
+        elif result.outcome.is_out:
+            self._pitcher_consecutive_retired += 1
+        else:
+            # Walk, HBP, error — not a hit but not an out
+            self._pitcher_consecutive_retired = 0
+
+        self._inning_runs += result.runs_scored
+
+        # Apply Rich markup based on outcome
         log = self.query_one(PlayByPlayLog)
-        log.add_play(f"{name}: {outcome}{runs_text}")
+        if result.outcome == AtBatOutcome.HOME_RUN:
+            log.add_play(f"[bold yellow]{text}[/bold yellow]")
+        elif result.outcome == AtBatOutcome.REACHED_ON_ERROR:
+            log.add_play(f"[bold red]{text}[/bold red]")
+        else:
+            log.add_play(text)
 
     def _show_game_over(self) -> None:
         """Show game over message and end-game menu.
@@ -426,6 +489,9 @@ class GameScreen(Screen):
         self.away_hits = 0
         self.home_hits = 0
         self._current_half_inning = (1, InningHalf.TOP)
+        self._player_hit_counts = {}
+        self._pitcher_consecutive_retired = 0
+        self._inning_runs = 0
 
         # Clear play log and add opening divider
         log = self.query_one(PlayByPlayLog)
@@ -609,9 +675,18 @@ class GameScreen(Screen):
             )
             self.sub_manager.record_substitution(record)
 
+            # Reset pitcher tracking on pitching change
+            self._pitcher_consecutive_retired = 0
+
+            # Get old pitcher name for narrative
+            old_player = fielding_team.get_player(player_out_id)
+            old_pitcher_name = f"{old_player.name_first[0]}. {old_player.name_last}" if old_player else player_out_id
+            team_name = fielding_team.info.team_name
+
             # Add narrative to log
             log.add_play("")
-            log.add_play(f"[bold]Manager makes a pitching change: {pitcher_name} now pitching[/bold]")
+            sub_text = generate_substitution_text(old_pitcher_name, pitcher_name, team_name)
+            log.add_play(f"[bold]{sub_text}[/bold]")
             log.add_play("")
 
         elif sub_type == "pinch_hitter":
@@ -662,9 +737,15 @@ class GameScreen(Screen):
             )
             self.sub_manager.record_substitution(record)
 
+            # Get replaced batter name for narrative
+            replaced_player = batting_team.get_player(player_out_id)
+            replaced_name = f"{replaced_player.name_first[0]}. {replaced_player.name_last}" if replaced_player else player_out_id
+            team_name = batting_team.info.team_name
+
             # Add narrative to log
             log.add_play("")
-            log.add_play(f"[bold]Pinch hitter: {batter_name} batting for {lineup_slot.player_id}[/bold]")
+            ph_text = generate_pinch_hitter_text(batter_name, replaced_name, team_name)
+            log.add_play(f"[bold]{ph_text}[/bold]")
             log.add_play("")
 
             # Refresh lineup cards to show new batter
