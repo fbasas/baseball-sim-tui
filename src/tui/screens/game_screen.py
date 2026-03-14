@@ -20,6 +20,7 @@ from src.game.fatigue import FatigueState, update_fatigue_state
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager, SubstitutionRecord, SubstitutionType
+from src.game.lineup_builder import build_lineup, get_default_starter
 from src.game.team import Team, create_lineup
 from src.simulation.engine import AtBatResult
 
@@ -102,79 +103,74 @@ class GameScreen(Screen):
         """Load teams and initialize game state.
 
         Loads 1927 Yankees (away) vs 1927 Cubs (home) as the default
-        matchup. Creates lineups from available batters and pitchers.
+        matchup. Shows pitcher selection for each team, then builds lineups.
         """
         try:
-            with LahmanRepository(str(_DB_PATH)) as repo:
-                # Load 1927 Yankees (away) vs 1927 Cubs (home)
-                self.away_team = Team.load_from_repository(repo, "NYA", 1927)
-                self.home_team = Team.load_from_repository(repo, "CHN", 1927)
+            self.repo = LahmanRepository(str(_DB_PATH))
 
-                # Create simple lineups from available batters
-                self._create_team_lineup(self.away_team)
-                self._create_team_lineup(self.home_team)
+            # Load 1927 Yankees (away) vs 1927 Cubs (home)
+            self.away_team = Team.load_from_repository(self.repo, "NYA", 1927)
+            self.home_team = Team.load_from_repository(self.repo, "CHN", 1927)
 
-                self.engine = GameEngine()
-                self.game_state = GameState(
-                    away_pitcher_id=self.away_team.lineup.starting_pitcher_id,
-                    home_pitcher_id=self.home_team.lineup.starting_pitcher_id,
-                )
-
-                # Update widgets with real data
-                self._update_lineup_cards()
-                self._update_all_widgets()
-
-                # Add opening divider
-                log = self.query_one(PlayByPlayLog)
-                log.add_inning_divider(1, True)
+            # Show pitcher selection for away team first
+            self._show_pitcher_select(self.away_team, is_away=True)
 
         except Exception as e:
             log = self.query_one(PlayByPlayLog)
             log.add_play(f"Error loading game: {e}")
 
-    def _create_team_lineup(self, team: Team) -> None:
-        """Create a lineup from team's available batters.
-
-        Selects the first 9 batters with stats and the first pitcher.
-        Assigns standard defensive positions in simplified order.
-        Ensures pitcher is not duplicated in batting order.
+    def _show_pitcher_select(self, team: Team, is_away: bool) -> None:
+        """Show pitcher selection modal for a team.
 
         Args:
-            team: Team to create lineup for.
-
-        Raises:
-            ValueError: If not enough players available.
+            team: Team to select pitcher for.
+            is_away: True if this is the away team.
         """
-        pitchers = team.get_available_pitchers()
-        if not pitchers:
-            raise ValueError(f"No pitchers available for {team.info.team_name}")
+        from .pitcher_select_screen import PitcherSelectScreen
 
-        # Select starting pitcher first
-        starting_pitcher_id = pitchers[0].player_id
+        default_pid = get_default_starter(team, self.repo)
+        pitchers = []
+        for p in team.get_available_pitchers():
+            ps = team.pitching_stats.get(p.player_id)
+            gs = ps.games_started if ps else 0
+            name = f"{p.name_last}, {p.name_first}"
+            pitchers.append((p.player_id, name, gs))
+        pitchers.sort(key=lambda x: x[2], reverse=True)
 
-        # Get batters, excluding the starting pitcher
-        all_batters = team.get_available_batters()
-        batters = [b for b in all_batters if b.player_id != starting_pitcher_id][:9]
+        def on_pitcher_chosen(chosen_id: str) -> None:
+            if is_away:
+                self._away_pitcher_id = chosen_id or default_pid
+                # Now show pitcher selection for home team
+                self._show_pitcher_select(self.home_team, is_away=False)
+            else:
+                self._home_pitcher_id = chosen_id or default_pid
+                self._finalize_game_setup()
 
-        if len(batters) < 9:
-            raise ValueError(f"Not enough batters for {team.info.team_name}")
-
-        # Assign positions (simplified - standard positions)
-        positions_list: List = [
-            Position.CENTER_FIELD, Position.SHORTSTOP, Position.RIGHT_FIELD,
-            Position.FIRST_BASE, Position.LEFT_FIELD, Position.CATCHER,
-            Position.THIRD_BASE, Position.SECOND_BASE, DesignatedHitter
-        ]
-
-        batting_order = [b.player_id for b in batters]
-        positions = {batting_order[i]: positions_list[i] for i in range(9)}
-
-        team.lineup = create_lineup(
-            team,
-            batting_order,
-            positions,
-            pitchers[0].player_id
+        self.app.push_screen(
+            PitcherSelectScreen(
+                team_name=f"{team.info.year} {team.info.team_name}",
+                pitchers=pitchers,
+                default_pitcher_id=default_pid,
+            ),
+            on_pitcher_chosen,
         )
+
+    def _finalize_game_setup(self) -> None:
+        """Build lineups with chosen pitchers and start the game."""
+        build_lineup(self.away_team, self.repo, pitcher_id=self._away_pitcher_id)
+        build_lineup(self.home_team, self.repo, pitcher_id=self._home_pitcher_id)
+
+        self.engine = GameEngine()
+        self.game_state = GameState(
+            away_pitcher_id=self.away_team.lineup.starting_pitcher_id,
+            home_pitcher_id=self.home_team.lineup.starting_pitcher_id,
+        )
+
+        self._update_lineup_cards()
+        self._update_all_widgets()
+
+        log = self.query_one(PlayByPlayLog)
+        log.add_inning_divider(1, True)
 
     def _update_lineup_cards(self) -> None:
         """Update lineup card widgets with real team data."""
