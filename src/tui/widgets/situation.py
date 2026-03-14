@@ -15,15 +15,18 @@ class SituationWidget(Static):
     """Widget showing current inning, outs, and baserunners.
 
     Displays the game situation: which half of which inning, how many
-    outs, and which bases are occupied with optional player names.
+    outs, and which bases are occupied with an ASCII base diamond.
 
     Example:
         >>> widget = SituationWidget()
         >>> widget.update_from_state(state, {'first': 'Ruth', 'third': 'Gehrig'})
         # Displays:
-        # Top 3rd
-        # Outs: 1
-        # Runners: 1B: Ruth, 3B: Gehrig
+        # Top 3rd | Outs: 1
+        #      [2B]
+        #     /    \\
+        #  [3B]    [1B]
+        #     \\    /
+        #      [H]
     """
 
     def __init__(self, **kwargs) -> None:
@@ -57,6 +60,32 @@ class SituationWidget(Static):
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
         return f"{n}{suffix}"
 
+    def _base_diamond(self, first: bool, second: bool, third: bool) -> str:
+        """Render an ASCII base diamond with occupied/empty indicators.
+
+        Args:
+            first: True if runner on first base.
+            second: True if runner on second base.
+            third: True if runner on third base.
+
+        Returns:
+            Multi-line string with Rich markup for the base diamond.
+        """
+        # Use Rich markup: bold yellow for occupied, dim for empty
+        b1 = "[bold yellow]1B[/bold yellow]" if first  else "[dim]1B[/dim]"
+        b2 = "[bold yellow]2B[/bold yellow]" if second else "[dim]2B[/dim]"
+        b3 = "[bold yellow]3B[/bold yellow]" if third  else "[dim]3B[/dim]"
+        home = "[dim] H[/dim]"
+
+        lines = [
+            f"       {b2}     ",
+            f"      /    \\    ",
+            f"  {b3}        {b1}",
+            f"      \\    /    ",
+            f"       {home}     ",
+        ]
+        return "\n".join(lines)
+
     def update_from_state(
         self,
         state: GameState,
@@ -76,21 +105,15 @@ class SituationWidget(Static):
         # Outs display
         outs_str = f"Outs: {state.outs}"
 
-        # Runners display
-        runners = []
+        # Base occupancy
         bases = state.base_state
-        names = runner_names or {}
+        first_occupied = bases.first is not None
+        second_occupied = bases.second is not None
+        third_occupied = bases.third is not None
 
-        if bases.first:
-            name = names.get("first", "Runner")
-            runners.append(f"1B: {name}")
-        if bases.second:
-            name = names.get("second", "Runner")
-            runners.append(f"2B: {name}")
-        if bases.third:
-            name = names.get("third", "Runner")
-            runners.append(f"3B: {name}")
+        # Build base diamond
+        diamond = self._base_diamond(first_occupied, second_occupied, third_occupied)
 
-        runners_str = "Runners: " + ", ".join(runners) if runners else "Bases empty"
-
-        self.update(f"{inning_str}\n{outs_str}\n{runners_str}")
+        # Combine into display
+        header = f"{inning_str}  |  {outs_str}"
+        self.update(f"{header}\n{diamond}")
