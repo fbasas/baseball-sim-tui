@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Phase 5 context gathered
-last_updated: "2026-03-14T19:07:31.489Z"
+stopped_at: Completed 05-02-PLAN.md (TCSS baseball theme + base diamond)
+last_updated: "2026-03-14T21:04:55.618Z"
 last_activity: 2026-01-29 - Completed 04-05-PLAN.md (GameScreen integration)
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 19
-  completed_plans: 19
+  total_plans: 23
+  completed_plans: 20
   percent: 95
 ---
 
@@ -53,6 +53,7 @@ Progress: [██████████████████░] 95% (19 of
 - Note: 04-05 extended due to CSS debugging for substitution menu width
 
 *Updated after each plan completion*
+| Phase 05-narrative-polish P02 | 3 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -121,6 +122,8 @@ Recent decisions affecting current work:
 - Availability status pattern: grayed + suffix for unavailable items (04-04)
 - Exclude starting pitcher from batting order: Prevents duplicate in lineup (04-05)
 - Simplified substitution menu: Vertical layout, pitching changes only for now (04-05)
+- [Phase 05-02]: Hex color values over Textual CSS variables: theme vars map to default palette not baseball colors
+- [Phase 05-02]: Bold yellow Rich markup for occupied bases, dim for empty: visible contrast on dark green background
 
 ### Pending Todos
 
@@ -133,9 +136,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-14T19:07:31.484Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-narrative-polish/05-CONTEXT.md
+Last session: 2026-03-14T21:04:55.615Z
+Stopped at: Completed 05-02-PLAN.md (TCSS baseball theme + base diamond)
+Resume file: None
 
 **When resuming Phase 4 testing:**
 1. Run `python -m src.tui.app`

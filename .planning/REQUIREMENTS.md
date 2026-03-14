@@ -43,7 +43,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **TUI-03**: Display situation panel (inning, outs, baserunners)
 - [ ] **TUI-04**: Display scrolling play-by-play log
 - [ ] **TUI-05**: Implement reactive widgets that auto-update on state changes
-- [ ] **TUI-06**: Apply TCSS styling for visual polish
+- [x] **TUI-06**: Apply TCSS styling for visual polish
 
 ### Narrative
 
@@ -114,7 +114,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TUI-03 | Phase 3 | Pending |
 | TUI-04 | Phase 3 | Pending |
 | TUI-05 | Phase 3 | Pending |
-| TUI-06 | Phase 5 | Pending |
+| TUI-06 | Phase 5 | Complete |
 | NARR-01 | Phase 5 | Pending |
 | NARR-02 | Phase 5 | Pending |
 

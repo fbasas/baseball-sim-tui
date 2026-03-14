@@ -121,4 +121,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
 | 4. Substitutions & Advanced Mechanics | 0/5 | Planned | - |
-| 5. Narrative & Polish | 0/4 | Planned | - |
+| 5. Narrative & Polish | 1/4 | In Progress|  |
