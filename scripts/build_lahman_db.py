@@ -96,6 +96,18 @@ REQUIRED_TABLES = {
             ("teams_team_year_idx", ["teamID", "yearID"]),
         ],
     },
+    "Appearances": {
+        "csv_name": "Appearances.csv",
+        "columns": [
+            "yearID", "teamID", "lgID", "playerID", "G_all", "GS", "G_batting",
+            "G_defense", "G_p", "G_c", "G_1b", "G_2b", "G_3b", "G_ss",
+            "G_lf", "G_cf", "G_rf", "G_of", "G_dh", "G_ph", "G_pr"
+        ],
+        "indexes": [
+            ("appearances_team_year_idx", ["teamID", "yearID"]),
+            ("appearances_player_year_idx", ["playerID", "yearID"]),
+        ],
+    },
 }
 
 

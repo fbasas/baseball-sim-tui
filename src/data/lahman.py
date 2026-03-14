@@ -229,6 +229,40 @@ class LahmanRepository:
             for row in cursor.fetchall()
         ]
 
+    def get_appearances(
+        self, team_id: str, year: int
+    ) -> List[dict]:
+        """
+        Get player appearance data (games at each position) for a team/year.
+
+        Args:
+            team_id: Lahman teamID (e.g., 'NYA' for Yankees).
+            year: Season year.
+
+        Returns:
+            List of dicts with playerID and G_* position game counts as integers.
+            Returns empty list if no data found.
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT
+                playerID,
+                CAST(G_c AS INTEGER) as G_c,
+                CAST(G_1b AS INTEGER) as G_1b,
+                CAST(G_2b AS INTEGER) as G_2b,
+                CAST(G_3b AS INTEGER) as G_3b,
+                CAST(G_ss AS INTEGER) as G_ss,
+                CAST(G_lf AS INTEGER) as G_lf,
+                CAST(G_cf AS INTEGER) as G_cf,
+                CAST(G_rf AS INTEGER) as G_rf,
+                CAST(G_dh AS INTEGER) as G_dh
+            FROM Appearances
+            WHERE teamID = ? AND yearID = ?
+            """,
+            (team_id, year),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_team_season(
         self, team_id: str, year: int
     ) -> Optional[TeamSeason]:
