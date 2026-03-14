@@ -102,11 +102,13 @@ Plans:
   2. End of game shows detailed box score with all player statistics
   3. Dashboard has TCSS styling for visual clarity and polish
   4. Play-by-play text includes player names, teams, and situational context
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 05-01: TBD after planning
-- [ ] 05-02: TBD after planning
+- [ ] 05-01-PLAN.md — Appearances table import, historically accurate lineup builder
+- [ ] 05-02-PLAN.md — TCSS baseball color theme, base diamond, footer key bindings
+- [ ] 05-03-PLAN.md — Narrative engine with broadcaster templates, GameScreen integration
+- [ ] 05-04-PLAN.md — Full-screen box score screen, stat tracking, human verification
 
 ## Progress
 
@@ -119,4 +121,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
 | 4. Substitutions & Advanced Mechanics | 0/5 | Planned | - |
-| 5. Narrative & Polish | 0/TBD | Not started | - |
+| 5. Narrative & Polish | 0/4 | Planned | - |
