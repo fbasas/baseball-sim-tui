@@ -32,9 +32,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### In-Game Decisions
 
-- [ ] **SUBS-01**: Make pitching changes during the game
-- [ ] **SUBS-02**: Make pinch-hitting substitutions during the game
-- [ ] **SUBS-03**: Enforce substitution rules (can't reuse removed players)
+- [ ] **SUBS-01**: Make pitching changes during the game (partial — UI works but simulation uses starter's stats)
+- [ ] **SUBS-02**: Make pinch-hitting substitutions during the game (partial — UI not rendered)
+- [ ] **SUBS-03**: Enforce substitution rules (can't reuse removed players) (partial — display-only)
 
 ### TUI Display
 
@@ -47,8 +47,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Narrative
 
-- [ ] **NARR-01**: Display detailed box score at end of game
-- [ ] **NARR-02**: Generate narrative play-by-play text for each at-bat
+- [ ] **NARR-01**: Display detailed box score at end of game (partial — R column always 0)
+- [x] **NARR-02**: Generate narrative play-by-play text for each at-bat
+
+### Computer Manager
+
+- [ ] **CMGR-01**: CPU opponent makes intelligent substitution decisions (pitching changes, pinch hitters)
 
 ## v2 Requirements
 
@@ -106,23 +110,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEAM-02 | Phase 2 | Complete |
 | LINE-01 | Phase 2 | Complete |
 | LINE-02 | Phase 2 | Complete |
-| SUBS-01 | Phase 4 | Pending |
-| SUBS-02 | Phase 4 | Pending |
-| SUBS-03 | Phase 4 | Pending |
-| TUI-01 | Phase 3 | Pending |
-| TUI-02 | Phase 3 | Pending |
-| TUI-03 | Phase 3 | Pending |
-| TUI-04 | Phase 3 | Pending |
-| TUI-05 | Phase 3 | Pending |
+| SUBS-01 | Phase 4 → Phase 6 | Partial |
+| SUBS-02 | Phase 4 → Phase 6 | Partial |
+| SUBS-03 | Phase 4 → Phase 6 | Partial |
+| TUI-01 | Phase 3 | Complete |
+| TUI-02 | Phase 3 | Complete |
+| TUI-03 | Phase 3 | Complete |
+| TUI-04 | Phase 3 | Complete |
+| TUI-05 | Phase 3 | Complete |
 | TUI-06 | Phase 5 | Complete |
-| NARR-01 | Phase 5 | Pending |
-| NARR-02 | Phase 5 | Pending |
+| NARR-01 | Phase 5 → Phase 7 | Partial |
+| NARR-02 | Phase 5 | Complete |
+| TEAM-01 | Phase 2 → Phase 7 | Partial |
+| CMGR-01 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 22 total
-- Mapped to phases: 22
+- v1 requirements: 23 total (22 original + CMGR-01)
+- Mapped to phases: 23
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-01-28*
-*Last updated: 2026-01-29 after Phase 2 completion*
+*Last updated: 2026-03-14 after v1.0 milestone audit — gap closure phases 6-8 added*

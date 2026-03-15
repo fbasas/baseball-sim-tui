@@ -15,8 +15,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Data Foundation & Simulation Core** - Load Lahman database and implement statistically accurate at-bat simulation
 - [x] **Phase 2: Game Flow & Team Management** - Orchestrate complete games with proper baseball rules and lineup management
 - [x] **Phase 3: Minimal Playable TUI** - Create dashboard interface enabling user to play through games
-- [ ] **Phase 4: Substitutions & Advanced Mechanics** - Add managerial decisions for pitching changes and pinch hitters
-- [ ] **Phase 5: Narrative & Polish** - Generate play-by-play text and apply visual styling
+- [x] **Phase 4: Substitutions & Advanced Mechanics** - Add managerial decisions for pitching changes and pinch hitters
+- [x] **Phase 5: Narrative & Polish** - Generate play-by-play text and apply visual styling
+- [ ] **Phase 6: Substitution Wiring Fixes** - Fix broken pitcher change simulation, pinch hitter UI, fatigue wiring
+- [ ] **Phase 7: Team Selection & Box Score Fixes** - Team/year selection UI, batting R column tracking
+- [ ] **Phase 8: Computer Manager** - AI manager makes substitution decisions for CPU team
 
 ## Phase Details
 
@@ -110,6 +113,41 @@ Plans:
 - [ ] 05-03-PLAN.md — Narrative engine with broadcaster templates, GameScreen integration
 - [ ] 05-04-PLAN.md — Full-screen box score screen, stat tracking, human verification
 
+### Phase 6: Substitution Wiring Fixes
+**Goal**: Pitching changes affect at-bat simulation, pinch hitter UI is accessible, fatigue degrades pitcher performance, substitution validation is enforced
+**Depends on**: Phase 5
+**Requirements**: SUBS-01, SUBS-02, SUBS-03
+**Gap Closure:** Closes gaps from v1.0 audit
+**Success Criteria** (what must be TRUE):
+  1. After a pitching change, the next at-bat simulates using the new pitcher's stats (not the starter's)
+  2. Fatigue modifier is applied to pitcher stats before simulation — high-fatigue pitchers give up more hits
+  3. User can select a pinch hitter from the substitution menu UI
+  4. Substitutions are validated through GameEngine (no-re-entry, DH forfeiture)
+  5. Replaying a game resets substitution tracking (removed players available again)
+**Plans**: TBD
+
+### Phase 7: Team Selection & Box Score Fixes
+**Goal**: User selects any team from any year before game starts; box score batting R column tracks runs scored per player
+**Depends on**: Phase 6
+**Requirements**: TEAM-01, NARR-01
+**Gap Closure:** Closes gaps from v1.0 audit
+**Success Criteria** (what must be TRUE):
+  1. Before game start, user picks away and home teams by entering team ID and year
+  2. User sees roster preview or team name confirmation before proceeding
+  3. Box score batting table R column shows actual runs scored per player (not always 0)
+**Plans**: TBD
+
+### Phase 8: Computer Manager
+**Goal**: CPU opponent makes intelligent substitution decisions during its half-innings
+**Depends on**: Phase 6
+**Requirements**: CMGR-01
+**Success Criteria** (what must be TRUE):
+  1. CPU manager pulls pitcher when fatigue exceeds threshold or times-through-order penalty is high
+  2. CPU manager sends pinch hitter in late innings when trailing and weak hitter is due up
+  3. CPU substitution decisions appear in play log with narrative text
+  4. User still controls their own team's substitutions manually
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
@@ -120,5 +158,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Data Foundation & Simulation Core | 6/6 | Complete | 2026-01-28 |
 | 2. Game Flow & Team Management | 4/4 | Complete | 2026-01-29 |
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
-| 4. Substitutions & Advanced Mechanics | 0/5 | Planned | - |
-| 5. Narrative & Polish | 1/4 | In Progress|  |
+| 4. Substitutions & Advanced Mechanics | 5/5 | Complete | 2026-01-29 |
+| 5. Narrative & Polish | 4/4 | Complete | 2026-03-14 |
+| 6. Substitution Wiring Fixes | 0/? | Planned | - |
+| 7. Team Selection & Box Score Fixes | 0/? | Planned | - |
+| 8. Computer Manager | 0/? | Planned | - |
