@@ -52,10 +52,12 @@ Screen {
 }
 
 #play-log {
+    height: 1fr;
     border: round #4a7c3f;
     padding: 0 1;
     background: #0d1f0d;
     color: #fffdd0;
+    overflow-y: scroll;
     overflow-x: hidden;
 }
 

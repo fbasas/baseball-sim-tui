@@ -171,17 +171,20 @@ class BoxScoreScreen(Screen):
         return "\n".join(lines)
 
     def _build_pitching_table(self) -> str:
-        """Build pitching stats table for both teams."""
+        """Build pitching stats table for both teams with team headers."""
         header = f"{'Pitcher':<18} {'IP':>5} {'H':>3} {'R':>3} {'ER':>3} {'BB':>3} {'K':>3}"
-        lines = [header]
+        lines = []
 
         for pitching_list, team_name in [(self._away_pitching, self._away_name), (self._home_pitching, self._home_name)]:
+            lines.append(f"  {team_name}")
+            lines.append(header)
             for entry in pitching_list:
                 name, stats, is_winner = entry
-                marker = " (W)" if is_winner else " (L)" if not is_winner else ""
+                marker = " (W)" if is_winner else " (L)"
                 ip = _format_ip(stats["outs"])
                 line = f"{name + marker:<18} {ip:>5} {stats['H']:>3} {stats['R']:>3} {stats['ER']:>3} {stats['BB']:>3} {stats['K']:>3}"
                 lines.append(line)
+            lines.append("")
 
         return "\n".join(lines)
 
