@@ -6,7 +6,7 @@ Screen {
     layout: grid;
     grid-size: 3;
     grid-columns: 1fr 2fr 1fr;
-    grid-rows: auto 1fr;
+    grid-rows: 1fr;
     background: #1a3a1a;
 }
 
