@@ -13,6 +13,7 @@ from textual.containers import Container
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.timer import Timer
+from textual.widgets import Footer
 
 from src.data.lahman import LahmanRepository
 from src.game.engine import GameEngine, check_game_complete, transition_half_inning
@@ -74,6 +75,7 @@ class GameScreen(Screen):
         # Box score stat tracking
         self._batting_lines: Dict[str, Dict[str, int]] = {}
         self._pitching_lines: Dict[str, Dict[str, int]] = {}
+        self._pitcher_teams: Dict[str, str] = {}  # pitcher_id -> "away" or "home"
         self._inning_scores: List[Tuple[int, int]] = []
         self._away_errors: int = 0
         self._home_errors: int = 0
@@ -99,6 +101,7 @@ class GameScreen(Screen):
             yield SituationWidget()
             yield PlayByPlayLog()
         yield LineupCard("Home", self._placeholder_lineup(), "home-lineup")
+        yield Footer()
 
     def _placeholder_lineup(self) -> List[Tuple[str, str, float]]:
         """Create placeholder lineup data until teams load.
@@ -193,10 +196,12 @@ class GameScreen(Screen):
         zero_bat = lambda: {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
         zero_pitch = lambda: {"outs": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "K": 0}
 
-        for team in (self.away_team, self.home_team):
+        for team, label in [(self.away_team, "away"), (self.home_team, "home")]:
             for slot in team.lineup.slots:
                 self._batting_lines[slot.player_id] = zero_bat()
-            self._pitching_lines[team.lineup.starting_pitcher_id] = zero_pitch()
+            pid = team.lineup.starting_pitcher_id
+            self._pitching_lines[pid] = zero_pitch()
+            self._pitcher_teams[pid] = label
 
     def _update_lineup_cards(self) -> None:
         """Update lineup card widgets with real team data."""
@@ -495,6 +500,7 @@ class GameScreen(Screen):
         # Pitching line
         if pitcher_id not in self._pitching_lines:
             self._pitching_lines[pitcher_id] = {"outs": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "K": 0}
+            self._pitcher_teams[pitcher_id] = "home" if state.half == InningHalf.TOP else "away"
         pl = self._pitching_lines[pitcher_id]
         if outcome == AtBatOutcome.GIDP:
             pl["outs"] += 2
@@ -546,11 +552,11 @@ class GameScreen(Screen):
                 lines.append((f"{name} {pos.lower()}", stats))
             return lines
 
-        # Build pitching data
-        def _build_pitching(team, is_winner):
+        # Build pitching data using tracked team association
+        def _build_pitching(label, team, is_winner):
             lines = []
             for pid, stats in self._pitching_lines.items():
-                if pid in team.pitching_stats:
+                if self._pitcher_teams.get(pid) == label:
                     p = team.get_player(pid)
                     name = p.name_last if p else pid
                     lines.append((name, stats, is_winner))
@@ -571,8 +577,8 @@ class GameScreen(Screen):
                 inning_scores=self._inning_scores,
                 away_batting=_build_batting(self.away_team),
                 home_batting=_build_batting(self.home_team),
-                away_pitching=_build_pitching(self.away_team, away_won),
-                home_pitching=_build_pitching(self.home_team, not away_won),
+                away_pitching=_build_pitching("away", self.away_team, away_won),
+                home_pitching=_build_pitching("home", self.home_team, not away_won),
                 winner="away" if away_won else "home",
             ),
             self._handle_end_game_choice,
@@ -605,6 +611,7 @@ class GameScreen(Screen):
         self._inning_runs = 0
         self._batting_lines = {}
         self._pitching_lines = {}
+        self._pitcher_teams = {}
         self._inning_scores = []
         self._away_errors = 0
         self._home_errors = 0

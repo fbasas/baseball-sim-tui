@@ -1,45 +1,45 @@
 """Play-by-play log widget for game events.
 
-This module provides the PlayByPlayLog widget that wraps Textual's Log
-for displaying scrolling play-by-play descriptions with inning dividers.
+This module provides the PlayByPlayLog widget that wraps Textual's RichLog
+for displaying scrolling play-by-play descriptions with Rich markup and
+inning dividers.
 """
 
-from textual.widgets import Log
+from textual.widgets import RichLog
 
 
-class PlayByPlayLog(Log):
-    """Scrolling play-by-play log with auto-scroll.
+class PlayByPlayLog(RichLog):
+    """Scrolling play-by-play log with auto-scroll and Rich markup.
 
     Displays game events as they happen, with automatic scrolling to
-    keep the latest play visible. Includes visual dividers for inning
-    transitions.
+    keep the latest play visible. Supports Rich markup for colored
+    text (e.g., bold yellow for home runs, bold red for errors).
 
     Example:
         >>> log = PlayByPlayLog()
         >>> log.add_inning_divider(1, True)  # "--- Top 1st ---"
-        >>> log.add_play("Ruth: Single (1 run)")
-        >>> log.add_play("Gehrig: Flyout")
+        >>> log.add_play("[bold yellow]Ruth crushes one! Home run![/bold yellow]")
     """
 
     def __init__(self, **kwargs) -> None:
         """Initialize the play-by-play log.
 
         Args:
-            **kwargs: Passed to parent Log widget.
+            **kwargs: Passed to parent RichLog widget.
         """
-        super().__init__(auto_scroll=True, **kwargs)
+        super().__init__(auto_scroll=True, markup=True, **kwargs)
         self.id = "play-log"
 
     def add_play(self, description: str) -> None:
         """Add a play description to the log.
 
         Args:
-            description: Text describing the play outcome.
+            description: Text describing the play outcome. Supports Rich markup.
 
         Example:
-            >>> log.add_play("Ruth: Home Run (2 runs)")
+            >>> log.add_play("[bold yellow]Ruth: Home Run![/bold yellow]")
         """
-        self.write_line(description)
+        self.write(description)
 
     def add_inning_divider(self, inning: int, is_top: bool) -> None:
         """Add visual divider for inning transitions.
@@ -56,7 +56,7 @@ class PlayByPlayLog(Log):
         """
         half = "Top" if is_top else "Bot"
         ordinal = self._ordinal(inning)
-        self.write_line(f"\n--- {half} {ordinal} ---\n")
+        self.write(f"\n--- {half} {ordinal} ---\n")
 
     def _ordinal(self, n: int) -> str:
         """Convert number to ordinal string (1st, 2nd, 3rd, etc.).
