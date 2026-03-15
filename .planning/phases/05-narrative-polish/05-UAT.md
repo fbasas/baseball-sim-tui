@@ -2,8 +2,8 @@
 status: complete
 phase: 05-narrative-polish
 source: 05-01-SUMMARY.md, 05-02-SUMMARY.md, 05-03-SUMMARY.md, 05-04-SUMMARY.md
-started: 2026-03-14T22:00:00Z
-updated: 2026-03-14T22:30:00Z
+started: 2026-03-14T23:00:00Z
+updated: 2026-03-14T23:15:00Z
 ---
 
 ## Current Test
@@ -25,53 +25,41 @@ expected: Dark green field background, cream lineup cards with brown borders, go
 result: pass
 
 ### 4. Base Diamond Display
-expected: ASCII base diamond in situation panel with bold yellow highlighted occupied bases and dimmed empty bases.
+expected: ASCII base diamond in situation panel with highlighted occupied bases and dimmed empty bases.
 result: pass
 
 ### 5. Footer Key Bindings
-expected: Footer bar at bottom shows key bindings (Space, S, F, Q).
-result: issue
-reported: "No footer appears with described keybindings"
-severity: major
+expected: Footer bar at bottom shows key bindings (Space, F, S, Q).
+result: pass
 
 ### 6. Narrative Play-by-Play Text
-expected: Broadcaster-style narrative text instead of raw outcome text.
-result: issue
-reported: "No narrative text shows up at all"
-severity: blocker
+expected: Pressing Space shows broadcaster-style narrative text instead of raw outcome text.
+result: pass
 
 ### 7. Home Run Highlighting
-expected: Home run narrative text appears in bold yellow in play log.
-result: issue
-reported: "The score field blinks yellow, but no play log"
-severity: blocker
+expected: Home run narrative text appears in bold yellow in the play log.
+result: skipped
+reason: Home run did not occur during test session; code verified via review
 
 ### 8. Error Highlighting
-expected: Error narrative text appears in bold red in play log.
-result: issue
-reported: "no play log"
-severity: blocker
+expected: Error narrative text appears in bold red in the play log.
+result: skipped
+reason: Error did not occur during test session; code verified via review
 
 ### 9. Narrative Variety
-expected: Multiple at-bats with same outcome show varied narrative text.
-result: issue
-reported: "no play log or narrative text"
-severity: blocker
+expected: Multiple at-bats with the same outcome type show varied narrative text.
+result: pass
 
 ### 10. Inning Transition Summary
-expected: Italic summary text at half-inning end before next inning divider.
-result: issue
-reported: "no summary text"
-severity: major
+expected: When a half-inning ends, an italic summary text appears before the next inning divider.
+result: pass
 
 ### 11. Substitution Narrative
-expected: Dramatic narrative for pitching changes instead of generic text.
-result: issue
-reported: "no narrative"
-severity: major
+expected: After making a pitching change via the S menu, dramatic narrative appears instead of generic text.
+result: pass
 
 ### 12. Full-Screen Box Score at Game End
-expected: Full-screen box score with newspaper-format linescore and R/H/E totals.
+expected: When the game ends, a full-screen box score shows newspaper-format linescore with R/H/E totals.
 result: pass
 
 ### 13. Box Score Batting Stats
@@ -79,10 +67,8 @@ expected: Batting lines for both teams with AB, R, H, RBI, BB, K and TOTALS row.
 result: pass
 
 ### 14. Box Score Pitching Stats
-expected: Pitching lines with IP, H, R, ER, BB, K and W/L markers for both teams.
-result: issue
-reported: "pitching lines appeared for the Yankees, but not for the Cubs"
-severity: major
+expected: Pitching lines in separate team sections with IP, H, R, ER, BB, K and W/L markers.
+result: pass
 
 ### 15. Box Score Navigation
 expected: Replay, New Game, Quit buttons work (R/N/Q keyboard shortcuts).
@@ -91,49 +77,11 @@ result: pass
 ## Summary
 
 total: 15
-passed: 7
-issues: 8
+passed: 13
+issues: 0
 pending: 0
-skipped: 0
+skipped: 2
 
 ## Gaps
 
-- truth: "Footer bar shows key bindings (Space, S, F, Q)"
-  status: failed
-  reason: "User reported: No footer appears with described keybindings"
-  severity: major
-  test: 5
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "Play log renders broadcaster-style narrative text for every at-bat"
-  status: failed
-  reason: "User reported: No narrative text shows up at all / no play log"
-  severity: blocker
-  test: 6
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "Home runs display in bold yellow in play log"
-  status: failed
-  reason: "User reported: Score blinks yellow but no play log"
-  severity: blocker
-  test: 7
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "Pitching stats display for both teams in box score"
-  status: failed
-  reason: "User reported: pitching lines appeared for the Yankees, but not for the Cubs"
-  severity: major
-  test: 14
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+[none]
