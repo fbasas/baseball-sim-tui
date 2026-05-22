@@ -124,7 +124,12 @@ Plans:
   3. User can select a pinch hitter from the substitution menu UI
   4. Substitutions are validated through GameEngine (no-re-entry, DH forfeiture)
   5. Replaying a game resets substitution tracking (removed players available again)
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Engine simulation fixes: apply_fatigue_modifier called in simulate_half_inning + advance_game reads state.current_pitcher_id
+- [ ] 06-02-PLAN.md — DH forfeiture wiring: would_forfeit_dh detects DH-takes-field + make_substitution stamps dh_forfeited
+- [ ] 06-03-PLAN.md — TUI substitution wiring: render pinch hitter list, route through engine.make_substitution, reset sub_manager on replay
 
 ### Phase 7: Team Selection & Box Score Fixes
 **Goal**: User selects any team from any year before game starts; box score batting R column tracks runs scored per player
@@ -160,6 +165,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
 | 4. Substitutions & Advanced Mechanics | 5/5 | Complete | 2026-01-29 |
 | 5. Narrative & Polish | 4/4 | Complete | 2026-03-14 |
-| 6. Substitution Wiring Fixes | 0/? | Planned | - |
+| 6. Substitution Wiring Fixes | 0/3 | Planned | - |
 | 7. Team Selection & Box Score Fixes | 0/? | Planned | - |
 | 8. Computer Manager | 0/? | Planned | - |
