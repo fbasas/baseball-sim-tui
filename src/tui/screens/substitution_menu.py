@@ -89,7 +89,7 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     #sub-menu-container {
         width: 50vw;
         min-width: 50;
-        height: 20;
+        height: 26;
         background: $surface;
         border: thick $primary;
         padding: 1 2;
@@ -102,7 +102,14 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     }
 
     #pitcher-list {
-        height: 10;
+        height: 8;
+        width: 100%;
+        border: solid $primary-darken-2;
+        margin: 1 0;
+    }
+
+    #batter-list {
+        height: 8;
         width: 100%;
         border: solid $primary-darken-2;
         margin: 1 0;
@@ -162,6 +169,10 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         self._current_batter = current_batter_id
         self._selected_pitcher: Optional[str] = None
         self._selected_batter: Optional[str] = None
+        # Tracks which list the most recent selection came from.
+        # Values: "pitcher", "batter", or None (nothing selected yet).
+        # Used to disambiguate confirm intent when both lists have selections.
+        self._last_selection: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Container(id="sub-menu-container"):
@@ -171,6 +182,10 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
                 for pid, name, era, avail in self._pitchers:
                     stats = f"ERA {era:.2f}"
                     yield PlayerListItem(pid, name, stats, avail, id=f"p-{pid}")
+            yield Label("[bold]Available Pinch Hitters:[/bold]")
+            with VerticalScroll(id="batter-list"):
+                for pid, name, slash, avail in self._batters:
+                    yield PlayerListItem(pid, name, slash, avail, id=f"b-{pid}")
             with Horizontal(id="button-row"):
                 yield Button("Confirm", id="confirm", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
@@ -185,38 +200,48 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         # Determine if this is a pitcher or batter based on widget ID prefix
         if message.widget_id.startswith("p-"):
             self._selected_pitcher = message.player_id
+            self._last_selection = "pitcher"
         elif message.widget_id.startswith("b-"):
             self._selected_batter = message.player_id
+            self._last_selection = "batter"
+
+    def _resolve_confirm_choice(self) -> Optional[Tuple[str, str, str]]:
+        """Resolve the (sub_type, out_id, in_id) tuple to dismiss with.
+
+        Returns:
+            - ("pitching_change", current_pitcher, selected_pitcher) if a pitcher
+              is selected and no batter is (or pitcher is most recent).
+            - ("pinch_hitter", current_batter, selected_batter) if a batter is
+              selected and no pitcher is (or batter is most recent).
+            - None if nothing is selected. **No auto-fallback** — confirming
+              without a selection dismisses without making a substitution.
+        """
+        pitcher = self._selected_pitcher
+        batter = self._selected_batter
+
+        if pitcher and not batter:
+            return ("pitching_change", self._current_pitcher, pitcher)
+        if batter and not pitcher:
+            return ("pinch_hitter", self._current_batter, batter)
+        if pitcher and batter:
+            # Both selected — prefer the most recently selected
+            if self._last_selection == "batter":
+                return ("pinch_hitter", self._current_batter, batter)
+            return ("pitching_change", self._current_pitcher, pitcher)
+        # Neither selected — no auto-pick fallback (intentional UX change:
+        # the previous auto-pick-first-pitcher fallback masked selection
+        # failures and produced phantom substitutions).
+        return None
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel":
             self.dismiss(None)
         elif event.button.id == "confirm":
-            # For now, only support pitching changes
-            # If no pitcher selected, auto-select first available
-            selected = self._selected_pitcher
-            if not selected:
-                for pid, name, era, avail in self._pitchers:
-                    if avail:
-                        selected = pid
-                        break
-            if selected:
-                self.dismiss(("pitching_change", self._current_pitcher, selected))
-            else:
-                self.dismiss(None)
+            self.dismiss(self._resolve_confirm_choice())
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def action_confirm(self) -> None:
         """Confirm substitution with C key."""
-        selected = self._selected_pitcher
-        if not selected:
-            for pid, name, era, avail in self._pitchers:
-                if avail:
-                    selected = pid
-                    break
-        if selected:
-            self.dismiss(("pitching_change", self._current_pitcher, selected))
-        else:
-            self.dismiss(None)
+        self.dismiss(self._resolve_confirm_choice())
