@@ -6,7 +6,7 @@ capture realistic runner advancement patterns for each type of at-bat
 outcome based on the current base state.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .game_state import AdvancementResult, BaseState
 from .outcomes import AtBatOutcome
@@ -202,12 +202,75 @@ def advance_runners(
         idx = rng.choice(list(range(len(options))), probs)
         new_state, runs, _ = options[idx]
 
-    # Build list of runners who scored (simplified - doesn't track individual IDs)
-    # In a full implementation, we'd track which specific runners scored
-    runners_scored = ["runner"] * runs if runs > 0 else []
+    # Map old runner IDs onto the new boolean state and identify who scored
+    new_base_state, runners_scored = _resolve_runner_ids(
+        old_state=base_state,
+        new_bool_state=new_state,
+        batter_id=batter_id,
+        batter_destination=outcome.bases_gained,
+    )
 
     return AdvancementResult(
-        new_base_state=BaseState.from_tuple(new_state),
+        new_base_state=new_base_state,
         runs_scored=runs,
         runners_scored=runners_scored,
     )
+
+
+def _resolve_runner_ids(
+    old_state: BaseState,
+    new_bool_state: Tuple[bool, bool, bool],
+    batter_id: str,
+    batter_destination: int,
+) -> Tuple[BaseState, List[str]]:
+    """Assign real player IDs to a post-advancement base state.
+
+    The advancement matrices only track base occupancy as booleans. This
+    function reattaches IDs using the no-passing rule: runners advance in
+    order, lowest-base runners take the lowest leftover slots after the
+    batter is placed; any runner without a slot is treated as having scored.
+
+    Args:
+        old_state: Base state before the play (with real runner IDs).
+        new_bool_state: Post-advancement occupancy from the matrix.
+        batter_id: Player ID of the batter from this at-bat.
+        batter_destination: Bases the batter reached (1=1B, 2=2B, 3=3B, 4=home).
+
+    Returns:
+        (new BaseState with real IDs, list of player IDs who scored).
+    """
+    old_runners: List[Tuple[int, str]] = []
+    if old_state.first:
+        old_runners.append((1, old_state.first))
+    if old_state.second:
+        old_runners.append((2, old_state.second))
+    if old_state.third:
+        old_runners.append((3, old_state.third))
+
+    new_ids: List[Optional[str]] = [None, None, None]
+    if 1 <= batter_destination <= 3:
+        new_ids[batter_destination - 1] = batter_id
+
+    leftover_slots = [
+        i + 1 for i in range(3) if new_bool_state[i] and new_ids[i] is None
+    ]
+
+    scored: List[str] = []
+    runner_iter = iter(old_runners)
+    current = next(runner_iter, None)
+    for slot in leftover_slots:
+        if current is None:
+            break
+        if current[0] > slot:
+            continue
+        new_ids[slot - 1] = current[1]
+        current = next(runner_iter, None)
+
+    while current is not None:
+        scored.append(current[1])
+        current = next(runner_iter, None)
+
+    if batter_destination == 4:
+        scored.append(batter_id)
+
+    return BaseState(first=new_ids[0], second=new_ids[1], third=new_ids[2]), scored
