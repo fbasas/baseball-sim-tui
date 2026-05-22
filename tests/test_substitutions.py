@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.game.positions import Position
+from src.game.positions import DesignatedHitter, Position
 from src.game.state import InningHalf
 from src.game.substitutions import (
     SubstitutionManager,
@@ -288,3 +288,76 @@ def test_substitution_record_is_frozen():
     # Attempting to modify should raise an error
     with pytest.raises(Exception):  # FrozenInstanceError
         record.inning = 6
+
+
+# ---------------------------------------------------------------------------
+# Tests for extended would_forfeit_dh signature (Phase 06 Plan 02)
+# ---------------------------------------------------------------------------
+
+
+def test_would_forfeit_dh_for_dh_taking_field_position(fresh_manager):
+    """DH moving to a field position forfeits the DH (new old_position path).
+
+    When the player currently in the DH slot is moved to a defensive
+    position (e.g. a manager double-switches and puts the DH at LF), the
+    DH is forfeited for that team for the remainder of the game.
+    """
+    result = fresh_manager.would_forfeit_dh(
+        is_away_team=True,
+        sub_type=SubstitutionType.DEFENSIVE_REPLACEMENT,
+        position_change=Position.LEFT_FIELD,
+        old_position=DesignatedHitter,
+    )
+    assert result is True
+
+
+def test_would_forfeit_dh_pitcher_to_pitcher_does_not_forfeit(fresh_manager):
+    """A plain pitching change (PITCHER -> PITCHER) does NOT forfeit DH.
+
+    The old buggy path treated any non-None position_change as a forfeit
+    trigger for PITCHING_CHANGE, even PITCHER -> PITCHER. That was wrong.
+    """
+    result = fresh_manager.would_forfeit_dh(
+        is_away_team=True,
+        sub_type=SubstitutionType.PITCHING_CHANGE,
+        position_change=Position.PITCHER,
+        old_position=Position.PITCHER,
+    )
+    assert result is False
+
+
+def test_would_forfeit_dh_dh_to_dh_does_not_forfeit(fresh_manager):
+    """Pinch hitter replacing the DH and staying as DH does NOT forfeit."""
+    result = fresh_manager.would_forfeit_dh(
+        is_away_team=True,
+        sub_type=SubstitutionType.PINCH_HITTER,
+        position_change=DesignatedHitter,
+        old_position=DesignatedHitter,
+    )
+    assert result is False
+
+
+def test_would_forfeit_dh_pitcher_to_field_position_still_works(fresh_manager):
+    """Existing pitcher-to-field-position forfeit path still works with new signature."""
+    # With explicit old_position
+    result = fresh_manager.would_forfeit_dh(
+        is_away_team=True,
+        sub_type=SubstitutionType.PITCHING_CHANGE,
+        position_change=Position.FIRST_BASE,
+        old_position=Position.PITCHER,
+    )
+    assert result is True
+
+
+def test_would_forfeit_dh_returns_false_when_dh_inactive_with_new_signature(fresh_manager):
+    """When DH is already inactive, no signature variation can forfeit it again."""
+    fresh_manager.home_dh_active = False
+
+    # Even a DH-takes-field move on home team is no-op once forfeited
+    result = fresh_manager.would_forfeit_dh(
+        is_away_team=False,
+        sub_type=SubstitutionType.DEFENSIVE_REPLACEMENT,
+        position_change=Position.LEFT_FIELD,
+        old_position=DesignatedHitter,
+    )
+    assert result is False

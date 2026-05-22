@@ -8,9 +8,9 @@ This module enforces baseball's substitution rules:
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional
+from typing import Optional, Union
 
-from src.game.positions import Position
+from src.game.positions import DesignatedHitter, Position
 from src.game.state import InningHalf
 
 
@@ -180,35 +180,61 @@ class SubstitutionManager:
         self,
         is_away_team: bool,
         sub_type: SubstitutionType,
-        position_change: Optional[Position] = None,
+        position_change: Optional[Union[Position, type]] = None,
+        old_position: Optional[Union[Position, type]] = None,
     ) -> bool:
         """Check if this substitution would forfeit the DH.
 
-        DH is forfeited when:
-        - Pitcher enters the batting lineup (takes a field position other than DH)
-        - DH takes a field position (moves from DH to defensive position)
+        Two trigger paths (per MLB rules):
+
+        1. **Pitcher-to-field-position**: ``sub_type == PITCHING_CHANGE`` AND
+           ``position_change`` is a ``Position`` member OTHER THAN
+           ``Position.PITCHER`` (i.e. the new pitcher is also taking a fielding
+           slot — e.g. a double switch that moves the pitcher to first base).
+           A plain pitching change (PITCHER -> PITCHER) does NOT forfeit DH.
+
+        2. **DH-takes-field**: ``old_position is DesignatedHitter`` (the
+           sentinel class itself) AND ``position_change`` is a ``Position``
+           member. The player previously occupying the DH slot is being moved
+           into a defensive position, so the DH is lost.
 
         Args:
-            is_away_team: True if substitution is for away team
-            sub_type: Type of substitution being made
-            position_change: New position player is taking (None for pinch hitter)
+            is_away_team: True if substitution is for away team.
+            sub_type: Type of substitution being made.
+            position_change: New position player is taking. May be a
+                ``Position`` member, the ``DesignatedHitter`` sentinel class,
+                or ``None`` (pinch hitter / pinch runner with no position).
+            old_position: Position the outgoing player held. May be a
+                ``Position`` member, ``DesignatedHitter`` sentinel class, or
+                ``None`` (signature backward compat — old callers default to
+                None and only the pitcher-to-field-position path can fire).
 
         Returns:
-            True if this substitution would forfeit DH
+            True if this substitution would forfeit DH for the given team.
         """
         # Check if DH is even active for this team
         dh_active = self.away_dh_active if is_away_team else self.home_dh_active
         if not dh_active:
             return False  # Already forfeited, can't forfeit again
 
-        # Pitching changes where pitcher enters batting lineup forfeit DH
-        if sub_type == SubstitutionType.PITCHING_CHANGE and position_change is not None:
-            # Pitcher taking a field position (not just staying at pitcher)
+        # Path 1: pitching change where the new pitcher takes a non-PITCHER
+        # field slot (e.g. double switch puts the pitcher at first base).
+        # A pure PITCHER -> PITCHER change is NOT a forfeit.
+        if (
+            sub_type == SubstitutionType.PITCHING_CHANGE
+            and isinstance(position_change, Position)
+            and position_change is not Position.PITCHER
+        ):
             return True
 
-        # DH taking a field position forfeits DH
-        # This would be detected by checking if player was previously DH and now has position
-        # For now, return False as we'd need lineup context to detect this
-        # This will be properly handled when integrated with lineup management
+        # Path 2: the player in the DH slot is being moved to a field position.
+        # ``DesignatedHitter`` is a sentinel CLASS, not an instance — compare by
+        # identity. ``position_change`` must be a real ``Position`` member (not
+        # ``DesignatedHitter`` again, and not ``None``).
+        if (
+            old_position is DesignatedHitter
+            and isinstance(position_change, Position)
+        ):
+            return True
 
         return False

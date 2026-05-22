@@ -616,6 +616,203 @@ class TestFatigueEffectsSim:
         assert first.home_runs_allowed == base_hrs
 
 
+# ---------------------------------------------------------------------------
+# Helpers for TestMakeSubstitutionForfeitsDH (Phase 06 Plan 02)
+# ---------------------------------------------------------------------------
+
+
+def _make_team_with_dh(extra_player_ids: list[str] | None = None) -> Team:
+    """Build a Team with batting stats for the 9 lineup spots plus optional extras.
+
+    The lineup has DesignatedHitter at slot 8 (matching make_lineup()).
+    Extra player IDs (e.g. an incoming substitute) get batting_stats entries
+    so update_lineup_slot() succeeds.
+    """
+    info = TeamSeason(
+        team_id="TST", year=2020, league_id="AL",
+        team_name="Test Team", park_factor_batting=100, park_factor_pitching=100,
+    )
+    positions = [
+        Position.CENTER_FIELD, Position.SHORTSTOP, Position.LEFT_FIELD,
+        Position.FIRST_BASE, Position.RIGHT_FIELD, Position.THIRD_BASE,
+        Position.CATCHER, Position.SECOND_BASE, DesignatedHitter,
+    ]
+    slots = [
+        LineupSlot(f"b{i}", positions[i], make_batting_stats(f"b{i}"))
+        for i in range(9)
+    ]
+    lineup = Lineup(slots=slots, starting_pitcher_id="p1")
+
+    batting = {f"b{i}": make_batting_stats(f"b{i}") for i in range(9)}
+    for pid in (extra_player_ids or []):
+        batting[pid] = make_batting_stats(pid)
+
+    pitching = {"p1": make_pitching_stats("p1"), "p2": make_pitching_stats("p2")}
+
+    return Team(
+        info=info,
+        roster=[],
+        batting_stats=batting,
+        pitching_stats=pitching,
+        lineup=lineup,
+    )
+
+
+class TestMakeSubstitutionForfeitsDH:
+    """Tests proving make_substitution stamps dh_forfeited correctly."""
+
+    def test_pitcher_to_field_position_forfeits_dh(self):
+        """A substitute taking the DH slot but assigned to a field position
+        forfeits the DH for the substituting team."""
+        from src.game.substitutions import SubstitutionManager
+
+        sub_mgr = SubstitutionManager(away_uses_dh=True, home_uses_dh=True)
+        engine = GameEngine(substitution_manager=sub_mgr)
+        team = _make_team_with_dh(extra_player_ids=["sub_player"])
+
+        # Home batting (bottom of inning) -> home team makes the sub
+        state = GameState(half=InningHalf.BOTTOM)
+
+        # The player at slot 8 is the current DH (b8). Replace with sub_player
+        # who is now taking FIRST_BASE (Path 2: DH-takes-field).
+        new_state, new_team = engine.make_substitution(
+            state=state,
+            team=team,
+            is_away_team=False,
+            player_out_id="b8",
+            player_in_id="sub_player",
+            new_position=Position.FIRST_BASE,
+            is_pitching_change=False,
+        )
+
+        assert sub_mgr.home_dh_active is False
+        assert sub_mgr.away_dh_active is True  # opposite team unaffected
+        # Recorded SubstitutionRecord must flag dh_forfeited
+        assert len(sub_mgr.substitution_history) == 1
+        record = sub_mgr.substitution_history[0]
+        assert record.dh_forfeited is True
+        # And old_position captured BEFORE the mutation should be DH sentinel
+        # (we don't expose it on the record as a Position because DH isn't one)
+        assert record.old_position is None  # plan: only Position members go through
+        assert record.new_position is Position.FIRST_BASE
+
+    def test_plain_pitching_change_does_not_forfeit(self):
+        """PITCHER -> PITCHER swap with no position change is benign."""
+        from src.game.substitutions import SubstitutionManager
+
+        sub_mgr = SubstitutionManager(away_uses_dh=True, home_uses_dh=True)
+        engine = GameEngine(substitution_manager=sub_mgr)
+        team = _make_team_with_dh()
+
+        state = GameState(half=InningHalf.BOTTOM, home_pitcher_id="p1")
+
+        new_state, _ = engine.make_substitution(
+            state=state,
+            team=team,
+            is_away_team=False,
+            player_out_id="p1",
+            player_in_id="p2",
+            new_position=None,
+            is_pitching_change=True,
+        )
+
+        assert sub_mgr.home_dh_active is True
+        assert sub_mgr.away_dh_active is True
+        assert len(sub_mgr.substitution_history) == 1
+        record = sub_mgr.substitution_history[0]
+        assert record.dh_forfeited is False
+        # The buggy isinstance(x, type(Position)) used to set old_position to
+        # something weird; now both old_position and new_position should be
+        # Position.PITCHER (the substitution is PITCHER -> PITCHER).
+        assert record.old_position is Position.PITCHER
+        # new_position passed was None, so the engine should record None
+        # (the actual argument, not the buggy literal Position.PITCHER fallback).
+        assert record.new_position is None
+
+    def test_pinch_hitter_for_dh_no_forfeit(self):
+        """Pinch hitter replaces the DH and stays as DH -> no forfeit."""
+        from src.game.substitutions import SubstitutionManager
+
+        sub_mgr = SubstitutionManager(away_uses_dh=True, home_uses_dh=True)
+        engine = GameEngine(substitution_manager=sub_mgr)
+        team = _make_team_with_dh(extra_player_ids=["ph1"])
+
+        state = GameState(half=InningHalf.BOTTOM)
+
+        # Replace DH at slot 8 with a pinch hitter staying as DH
+        # (new_position=None means: keep existing slot position, which is DH)
+        new_state, new_team = engine.make_substitution(
+            state=state,
+            team=team,
+            is_away_team=False,
+            player_out_id="b8",
+            player_in_id="ph1",
+            new_position=None,
+            is_pitching_change=False,
+        )
+
+        assert sub_mgr.home_dh_active is True
+        assert sub_mgr.away_dh_active is True
+        assert len(sub_mgr.substitution_history) == 1
+        record = sub_mgr.substitution_history[0]
+        assert record.dh_forfeited is False
+
+    def test_inning_half_determines_team_forfeited(self):
+        """TOP -> away forfeits; BOTTOM -> home forfeits."""
+        from src.game.substitutions import SubstitutionManager
+
+        # TOP of inning: away team batting -> away team makes sub
+        sub_mgr_top = SubstitutionManager(away_uses_dh=True, home_uses_dh=True)
+        engine_top = GameEngine(substitution_manager=sub_mgr_top)
+        team_top = _make_team_with_dh(extra_player_ids=["sub_a"])
+
+        state_top = GameState(half=InningHalf.TOP)
+        engine_top.make_substitution(
+            state=state_top,
+            team=team_top,
+            is_away_team=True,
+            player_out_id="b8",
+            player_in_id="sub_a",
+            new_position=Position.LEFT_FIELD,
+            is_pitching_change=False,
+        )
+        assert sub_mgr_top.away_dh_active is False
+        assert sub_mgr_top.home_dh_active is True
+
+        # BOTTOM of inning: home team batting -> home team makes sub
+        sub_mgr_bot = SubstitutionManager(away_uses_dh=True, home_uses_dh=True)
+        engine_bot = GameEngine(substitution_manager=sub_mgr_bot)
+        team_bot = _make_team_with_dh(extra_player_ids=["sub_h"])
+
+        state_bot = GameState(half=InningHalf.BOTTOM)
+        engine_bot.make_substitution(
+            state=state_bot,
+            team=team_bot,
+            is_away_team=False,
+            player_out_id="b8",
+            player_in_id="sub_h",
+            new_position=Position.LEFT_FIELD,
+            is_pitching_change=False,
+        )
+        assert sub_mgr_bot.home_dh_active is False
+        assert sub_mgr_bot.away_dh_active is True
+
+    def test_old_position_derivation_no_longer_buggy(self):
+        """The buggy isinstance(new_position, type(Position)) must be gone."""
+        import re
+        from pathlib import Path
+
+        engine_path = (
+            Path(__file__).resolve().parent.parent / "src" / "game" / "engine.py"
+        )
+        text = engine_path.read_text(encoding="utf-8")
+        # Old buggy pattern: isinstance(<x>, type(Position))
+        matches = re.findall(r"isinstance\([^,]+,\s*type\(Position\)\)", text)
+        assert matches == [], (
+            f"Buggy isinstance(x, type(Position)) still present in engine.py: {matches}"
+        )
+
+
 class TestAdvanceGamePitcherLookup:
     """Static checks proving GameScreen.advance_game uses resolve_pitcher_stats."""
 

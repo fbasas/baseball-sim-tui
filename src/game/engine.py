@@ -257,22 +257,40 @@ class GameEngine:
             if not valid:
                 raise ValueError(error)
 
+        # Derive which team is making the substitution from the inning half:
+        # TOP -> away team batting (so away makes the sub), BOTTOM -> home.
+        # This matches SubstitutionManager.record_substitution's own logic
+        # for flipping the dh_active flag.
+        is_away_team_derived = (state.half == InningHalf.TOP)
+
         if is_pitching_change:
             # Update pitcher in state
             new_state = state.with_pitcher(player_in_id, FatigueState())
 
             # Record substitution if manager exists
             if self.sub_manager is not None:
+                # For a pitching change the outgoing player is by definition
+                # a pitcher. Detection: if the new pitcher is taking a
+                # non-PITCHER field slot (a double switch), DH is forfeited.
+                dh_forfeited_flag = self.sub_manager.would_forfeit_dh(
+                    is_away_team=is_away_team_derived,
+                    sub_type=SubstitutionType.PITCHING_CHANGE,
+                    position_change=new_position,
+                    old_position=Position.PITCHER,
+                )
                 record = SubstitutionRecord(
                     inning=state.inning,
                     half=state.half,
                     sub_type=SubstitutionType.PITCHING_CHANGE,
                     player_out_id=player_out_id,
                     player_in_id=player_in_id,
-                    old_position=Position.PITCHER if isinstance(new_position, type(Position)) else None,
-                    new_position=Position.PITCHER if isinstance(new_position, type(Position)) else None,
+                    old_position=Position.PITCHER,
+                    # Record the actual new_position passed by caller. If
+                    # they passed a Position member (double switch), keep
+                    # it; otherwise (plain PITCHER -> PITCHER) record None.
+                    new_position=new_position if isinstance(new_position, Position) else None,
                     batting_order_slot=0,  # Pitchers typically don't have batting slot in lineup
-                    dh_forfeited=False,
+                    dh_forfeited=dh_forfeited_flag,
                 )
                 self.sub_manager.record_substitution(record)
 
@@ -292,7 +310,24 @@ class GameEngine:
             if slot_index is None:
                 raise ValueError(f"Player {player_out_id} not found in lineup")
 
-            # Update the lineup
+            # CAPTURE old_position BEFORE the mutation. The slot's position
+            # may be a Position member OR the DesignatedHitter sentinel
+            # class; we pass it through to would_forfeit_dh unchanged.
+            old_slot_position = team.lineup.slots[slot_index].position
+
+            # Detect DH forfeiture BEFORE we touch the lineup. would_forfeit_dh
+            # path 2 fires when old_position is DesignatedHitter and
+            # position_change is a Position member.
+            dh_forfeited_flag = False
+            if self.sub_manager is not None:
+                dh_forfeited_flag = self.sub_manager.would_forfeit_dh(
+                    is_away_team=is_away_team_derived,
+                    sub_type=SubstitutionType.PINCH_HITTER,
+                    position_change=new_position,
+                    old_position=old_slot_position,
+                )
+
+            # Update the lineup (mutates team.lineup.slots[slot_index])
             team.update_lineup_slot(slot_index, player_in_id, new_position)
 
             # Record substitution if manager exists
@@ -303,10 +338,14 @@ class GameEngine:
                     sub_type=SubstitutionType.PINCH_HITTER,
                     player_out_id=player_out_id,
                     player_in_id=player_in_id,
-                    old_position=team.lineup.slots[slot_index].position if isinstance(team.lineup.slots[slot_index].position, Position) else None,
-                    new_position=new_position,
+                    # Only record concrete Position members; DesignatedHitter
+                    # sentinel is not a Position so it serializes to None on
+                    # the record (SubstitutionRecord.old_position is
+                    # Optional[Position]).
+                    old_position=old_slot_position if isinstance(old_slot_position, Position) else None,
+                    new_position=new_position if isinstance(new_position, Position) else None,
                     batting_order_slot=slot_index,
-                    dh_forfeited=False,
+                    dh_forfeited=dh_forfeited_flag,
                 )
                 self.sub_manager.record_substitution(record)
 
