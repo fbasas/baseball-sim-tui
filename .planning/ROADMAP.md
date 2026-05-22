@@ -157,7 +157,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-02-PLAN.md — DH forfeiture wiring: would_forfeit_dh detects DH-takes-field + make_substitution stamps dh_forfeited
+- [x] 06-02-PLAN.md — DH forfeiture wiring: would_forfeit_dh detects DH-takes-field + make_substitution stamps dh_forfeited
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -203,6 +203,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
 | 4. Substitutions & Advanced Mechanics | 5/5 | Complete | 2026-01-29 |
 | 5. Narrative & Polish | 4/4 | Complete | 2026-03-14 |
-| 6. Substitution Wiring Fixes | 1/3 | In Progress|  |
+| 6. Substitution Wiring Fixes | 2/3 | In Progress|  |
 | 7. Team Selection & Box Score Fixes | 0/? | Planned | - |
 | 8. Computer Manager | 0/? | Planned | - |
