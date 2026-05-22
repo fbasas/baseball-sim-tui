@@ -269,7 +269,8 @@ class GameScreen(Screen):
         # Update situation
         situation = self.query_one(SituationWidget)
         runner_names = self._get_runner_names()
-        situation.update_from_state(state, runner_names)
+        batter_name = self._get_current_batter_name()
+        situation.update_from_state(state, runner_names, batter_name)
 
         # Update current batter highlight
         if state.half == InningHalf.TOP:
@@ -313,15 +314,36 @@ class GameScreen(Screen):
         fatigue_widget.update_fatigue(pitcher_name, fatigue)
 
     def _get_runner_names(self) -> Dict[str, str]:
-        """Get runner names for situation display.
+        """Resolve runner IDs on base to display names from the batting team."""
+        state = self.game_state
+        batting_team = self.away_team if state.half == InningHalf.TOP else self.home_team
+        if not batting_team:
+            return {}
 
-        Returns:
-            Empty dict for now (shows "Runner" placeholder).
-            Full implementation would track runner IDs in state.
-        """
-        # Simplified - would need to track runner IDs in state
-        # For now, return empty dict (shows "Runner" placeholder)
-        return {}
+        names: Dict[str, str] = {}
+        bases = state.base_state
+        for base, player_id in (
+            ("first", bases.first),
+            ("second", bases.second),
+            ("third", bases.third),
+        ):
+            if not player_id:
+                continue
+            player = batting_team.get_player(player_id)
+            names[base] = player.name_last if player else player_id
+        return names
+
+    def _get_current_batter_name(self) -> str:
+        """Resolve the current batter to a display name."""
+        state = self.game_state
+        batting_team = self.away_team if state.half == InningHalf.TOP else self.home_team
+        if not batting_team or not batting_team.lineup:
+            return ""
+        slot = batting_team.lineup.get_batter(state.current_batting_index)
+        player = batting_team.get_player(slot.player_id)
+        if player:
+            return f"{player.name_first[0]}. {player.name_last}"
+        return slot.player_id
 
     def advance_game(self) -> None:
         """Simulate one at-bat and update state.

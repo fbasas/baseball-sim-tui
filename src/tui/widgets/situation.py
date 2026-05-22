@@ -86,18 +86,33 @@ class SituationWidget(Static):
         ]
         return "\n".join(lines)
 
+    def _runner_legend(self, runner_names: Dict[str, str]) -> str:
+        """Render legend line listing runners on occupied bases."""
+        parts = []
+        for base, label in (("first", "1B"), ("second", "2B"), ("third", "3B")):
+            name = runner_names.get(base)
+            if name:
+                parts.append(f"[bold yellow]{label}[/bold yellow]: {name}")
+        if not parts:
+            return "[dim]Bases empty[/dim]"
+        return "  ".join(parts)
+
     def update_from_state(
         self,
         state: GameState,
         runner_names: Optional[Dict[str, str]] = None,
+        batter_name: Optional[str] = None,
     ) -> None:
         """Update display from game state.
 
         Args:
             state: Current GameState with inning, outs, and base_state.
             runner_names: Optional dict mapping base ('first', 'second', 'third')
-                         to player name for display. If None, shows generic "Runner".
+                         to player name for display. Empty/missing bases omitted.
+            batter_name: Display name of the current batter. Shown above the diamond.
         """
+        runner_names = runner_names or {}
+
         # Inning display
         half = "Top" if state.half == InningHalf.TOP else "Bot"
         inning_str = f"{half} {self._ordinal(state.inning)}"
@@ -113,7 +128,14 @@ class SituationWidget(Static):
 
         # Build base diamond
         diamond = self._base_diamond(first_occupied, second_occupied, third_occupied)
+        legend = self._runner_legend(runner_names)
 
         # Combine into display
         header = f"{inning_str}  |  {outs_str}"
-        self.update(f"{header}\n{diamond}")
+        batter_line = f"[bold]At bat:[/bold] {batter_name}" if batter_name else ""
+        sections = [header]
+        if batter_line:
+            sections.append(batter_line)
+        sections.append(diamond)
+        sections.append(legend)
+        self.update("\n".join(sections))

@@ -44,8 +44,8 @@ Screen {
 }
 
 #situation {
-    height: 9;
-    border: double #ffd700;
+    height: 12;
+    border: solid #ffd700;
     padding: 1;
     background: #2d5a1b;
     color: #fffdd0;
@@ -53,7 +53,7 @@ Screen {
 
 #play-log {
     height: 1fr;
-    border: round #4a7c3f;
+    border: solid #4a7c3f;
     padding: 0 1;
     background: #0d1f0d;
     color: #fffdd0;
