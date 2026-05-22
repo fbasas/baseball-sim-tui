@@ -854,3 +854,83 @@ class TestAdvanceGamePitcherLookup:
             "advance_game body does not call resolve_pitcher_stats — "
             "TUI hot path still bypasses GameState pitcher / fatigue"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 06 Plan 03: Engine-API reachability for DH forfeiture
+#
+# Disposition note (intentional, per 06-03-PLAN.md):
+#   The TUI substitution menu in Phase 06 exposes only `pitching_change` and
+#   `pinch_hitter` sub-types — neither triggers DH forfeiture. The defensive-
+#   replacement UI (which WOULD trigger forfeiture, e.g. moving the DH to LF)
+#   is DEFERRED to a future phase.
+#
+#   These tests duplicate `TestMakeSubstitutionForfeitsDH::test_pitcher_to_
+#   field_position_forfeits_dh` BY DESIGN: Plan 02 proves the engine method
+#   works in isolation; this class proves the wiring is still reachable in
+#   the context of the v1.0 TUI's deferred menu (Plan 03's chosen option).
+# ---------------------------------------------------------------------------
+
+
+class TestDHForfeitureReachability:
+    """Reachability tests for DH forfeiture via engine.make_substitution.
+
+    The TUI substitution menu in Phase 06 exposes only `pitching_change`
+    and `pinch_hitter` sub-types. Neither triggers DH forfeiture. The
+    defensive-replacement UI is deferred to a future phase. This class
+    exercises the engine-API path directly to prove the Plan 02 wiring
+    works end-to-end even though no TUI control invokes it in v1.0.
+    """
+
+    def test_dh_forfeiture_via_engine_api(self):
+        """End-to-end: a DH-takes-field substitution through the engine
+        flips the correct team's dh_active flag and stamps dh_forfeited
+        on the SubstitutionRecord.
+        """
+        from src.game.substitutions import SubstitutionManager
+
+        sub_mgr = SubstitutionManager(away_uses_dh=True, home_uses_dh=True)
+        engine = GameEngine(substitution_manager=sub_mgr)
+        team = _make_team_with_dh(extra_player_ids=["pitcher_to_first"])
+
+        # BOTTOM -> home team batting and substituting.
+        state = GameState(half=InningHalf.BOTTOM)
+
+        # Move the DH (slot 8) to FIRST_BASE — this is the Path-2 trigger:
+        # an old_position of DesignatedHitter taking a field Position.
+        new_state, new_team = engine.make_substitution(
+            state=state,
+            team=team,
+            is_away_team=False,
+            player_out_id="b8",  # the DH
+            player_in_id="pitcher_to_first",
+            new_position=Position.FIRST_BASE,
+            is_pitching_change=False,
+        )
+
+        # (a) sub_manager.home_dh_active flipped
+        assert engine.sub_manager.home_dh_active is False
+        assert engine.sub_manager.away_dh_active is True  # opposite team unaffected
+
+        # (b) recorded SubstitutionRecord has dh_forfeited == True
+        assert len(engine.sub_manager.substitution_history) == 1
+        record = engine.sub_manager.substitution_history[0]
+        assert record.dh_forfeited is True
+
+    def test_no_tui_trigger_documented(self):
+        """Documents (in the test itself) why the TUI cannot reach the
+        forfeiture branch in v1.0.
+
+        The TUI substitution menu in Phase 06 exposes only `pitching_change`
+        and `pinch_hitter` sub-types. Neither triggers DH forfeiture. The
+        defensive-replacement UI is deferred to a future phase. This test
+        exercises the engine-API path directly (see
+        `test_dh_forfeiture_via_engine_api`) to prove the Plan 02 wiring
+        works.
+
+        This test asserts nothing dynamic — its purpose is to live next
+        to the class docstring and prevent the deferral note from being
+        silently deleted.
+        """
+        assert TestDHForfeitureReachability.__doc__ is not None
+        assert "deferred" in TestDHForfeitureReachability.__doc__.lower()
