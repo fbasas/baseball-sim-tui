@@ -2,12 +2,14 @@
 
 import pytest
 from dataclasses import replace
+from unittest.mock import patch
 
 from src.game.engine import GameEngine
+from src.game.fatigue import FatigueState
 from src.game.state import GameState, InningHalf
-from src.game.team import Lineup, LineupSlot
+from src.game.team import Lineup, LineupSlot, Team
 from src.game.positions import Position, DesignatedHitter
-from src.data.models import BattingStats, PitchingStats
+from src.data.models import BattingStats, PitchingStats, TeamSeason
 from src.simulation.game_state import BaseState
 
 
@@ -410,3 +412,248 @@ class TestScoreTracking:
 
         assert new_state.away_score == 3
         assert new_state.home_score == 3
+
+
+# ---------------------------------------------------------------------------
+# Helpers for TestResolvePitcherStats / TestFatigueEffectsSim
+# ---------------------------------------------------------------------------
+
+def _make_team_with_two_pitchers(starter_id: str = "starter_p", reliever_id: str = "reliever_p") -> Team:
+    """Build a minimal Team with two pitchers in pitching_stats and a valid lineup.
+
+    The Lineup's starting_pitcher_id is intentionally the STARTER even though
+    the GameState in the tests will record the RELIEVER as the current pitcher.
+    This isolates the resolve_pitcher_stats bug: starting_pitcher_id vs state.
+    """
+    # Minimal TeamSeason just for typing (fields not used by the helper)
+    info = TeamSeason(
+        team_id="TST", year=2020, league_id="AL",
+        team_name="Test Team", park_factor_batting=100, park_factor_pitching=100,
+    )
+    # Build a 9-slot lineup (8 fielders + DH) — same shape as make_lineup()
+    positions = [
+        Position.CENTER_FIELD, Position.SHORTSTOP, Position.LEFT_FIELD,
+        Position.FIRST_BASE, Position.RIGHT_FIELD, Position.THIRD_BASE,
+        Position.CATCHER, Position.SECOND_BASE, DesignatedHitter,
+    ]
+    slots = [
+        LineupSlot(f"b{i}", positions[i], make_batting_stats(f"b{i}"))
+        for i in range(9)
+    ]
+    lineup = Lineup(slots=slots, starting_pitcher_id=starter_id)
+
+    pitching = {
+        starter_id: make_pitching_stats(starter_id),
+        reliever_id: make_pitching_stats(reliever_id),
+    }
+    batting = {f"b{i}": make_batting_stats(f"b{i}") for i in range(9)}
+
+    return Team(
+        info=info,
+        roster=[],  # Not exercised by resolve_pitcher_stats
+        batting_stats=batting,
+        pitching_stats=pitching,
+        lineup=lineup,
+    )
+
+
+class TestResolvePitcherStats:
+    """Tests for the resolve_pitcher_stats helper (TUI hot path lookup)."""
+
+    def test_returns_state_pitcher_id_not_lineup_starter(self):
+        """Helper must read pitcher from GameState, not lineup.starting_pitcher_id."""
+        from src.game.engine import resolve_pitcher_stats
+
+        team = _make_team_with_two_pitchers("starter_p", "reliever_p")
+        # state.half=TOP means home team is fielding -> home_pitcher_id is the active one.
+        # Lineup's starting_pitcher_id is 'starter_p' but GameState records 'reliever_p'.
+        state = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_id="reliever_p",
+            home_pitcher_fatigue=FatigueState(),  # zero fatigue
+        )
+
+        pitcher_id, stats = resolve_pitcher_stats(state, team)
+
+        assert pitcher_id == "reliever_p"
+        # With zero fatigue, stats should equal the reliever's base PitchingStats.
+        assert stats == team.pitching_stats["reliever_p"]
+
+    def test_applies_fatigue_modifier(self):
+        """Returned stats reflect fatigue modifier (hits *= 1 + fatigue*0.5)."""
+        from src.game.engine import resolve_pitcher_stats
+
+        team = _make_team_with_two_pitchers("p_main")
+        base_hits = team.pitching_stats["p_main"].hits_allowed
+        base_walks = team.pitching_stats["p_main"].walks_allowed
+        base_hrs = team.pitching_stats["p_main"].home_runs_allowed
+
+        # Fatigue 0.8
+        state = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_id="p_main",
+            home_pitcher_fatigue=FatigueState(current_fatigue=0.8),
+        )
+        _, stats_fatigued = resolve_pitcher_stats(state, team)
+
+        assert stats_fatigued.hits_allowed == int(base_hits * (1 + 0.8 * 0.5))
+        assert stats_fatigued.walks_allowed == int(base_walks * (1 + 0.8 * 0.3))
+        assert stats_fatigued.home_runs_allowed == int(base_hrs * (1 + 0.8 * 0.4))
+
+        # Fatigue 0.0 -> unchanged
+        state_zero = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_id="p_main",
+            home_pitcher_fatigue=FatigueState(current_fatigue=0.0),
+        )
+        _, stats_fresh = resolve_pitcher_stats(state_zero, team)
+        assert stats_fresh.hits_allowed == base_hits
+
+    def test_resolves_per_inning_half(self):
+        """TOP uses home_pitcher_id (home fielding); BOTTOM uses away_pitcher_id."""
+        from src.game.engine import resolve_pitcher_stats
+
+        team = _make_team_with_two_pitchers("home_p", "away_p")
+
+        state_top = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_id="home_p",
+            away_pitcher_id="away_p",
+        )
+        pid_top, _ = resolve_pitcher_stats(state_top, team)
+        assert pid_top == "home_p"
+
+        state_bot = GameState(
+            half=InningHalf.BOTTOM,
+            home_pitcher_id="home_p",
+            away_pitcher_id="away_p",
+        )
+        pid_bot, _ = resolve_pitcher_stats(state_bot, team)
+        assert pid_bot == "away_p"
+
+    def test_falls_back_to_starting_pitcher_if_state_pitcher_none(self):
+        """If state.current_pitcher_id is None, fall back to lineup.starting_pitcher_id."""
+        from src.game.engine import resolve_pitcher_stats
+
+        team = _make_team_with_two_pitchers("starter_p", "reliever_p")
+        # No pitcher IDs in state (pre-finalize)
+        state = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_id=None,
+            away_pitcher_id=None,
+        )
+        pid, stats = resolve_pitcher_stats(state, team)
+        assert pid == "starter_p"
+        assert stats == team.pitching_stats["starter_p"]
+
+
+class TestFatigueEffectsSim:
+    """Tests proving simulate_half_inning applies fatigue per AB."""
+
+    def test_fatigue_modifier_called_inside_simulate_half_inning(self):
+        """simulate_half_inning must wrap pitching_stats with apply_fatigue_modifier per AB."""
+        engine = GameEngine()
+        engine.reset_rng(12345)
+        lineup = make_lineup()
+        base_pitcher = make_pitching_stats("p1")
+        base_hits = base_pitcher.hits_allowed
+        base_walks = base_pitcher.walks_allowed
+        base_hrs = base_pitcher.home_runs_allowed
+
+        # Start with fatigue 0.8 — fatigue updates after each AB inside _apply_result,
+        # so the FIRST captured stats should reflect entry-time fatigue 0.8.
+        state = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_fatigue=FatigueState(current_fatigue=0.8),
+        )
+
+        captured = []
+        real_sim = engine.sim.simulate_at_bat
+
+        def capture(batting, pitching, base_state, **kw):
+            captured.append(pitching)
+            return real_sim(batting, pitching, base_state, **kw)
+
+        with patch.object(engine.sim, "simulate_at_bat", side_effect=capture):
+            engine.simulate_half_inning(state, lineup, base_pitcher)
+
+        assert captured, "simulate_at_bat was never called"
+        first = captured[0]
+        # First call: entry fatigue 0.8 should apply (fatigue updates AFTER the AB).
+        assert first.hits_allowed == int(base_hits * (1 + 0.8 * 0.5))
+        assert first.walks_allowed == int(base_walks * (1 + 0.8 * 0.3))
+        assert first.home_runs_allowed == int(base_hrs * (1 + 0.8 * 0.4))
+
+    def test_zero_fatigue_passes_stats_unchanged(self):
+        """With fatigue 0.0, captured stats equal base PitchingStats."""
+        engine = GameEngine()
+        engine.reset_rng(12345)
+        lineup = make_lineup()
+        base_pitcher = make_pitching_stats("p1")
+        base_hits = base_pitcher.hits_allowed
+        base_walks = base_pitcher.walks_allowed
+        base_hrs = base_pitcher.home_runs_allowed
+
+        state = GameState(
+            half=InningHalf.TOP,
+            home_pitcher_fatigue=FatigueState(current_fatigue=0.0),
+        )
+
+        captured = []
+        real_sim = engine.sim.simulate_at_bat
+
+        def capture(batting, pitching, base_state, **kw):
+            captured.append(pitching)
+            return real_sim(batting, pitching, base_state, **kw)
+
+        with patch.object(engine.sim, "simulate_at_bat", side_effect=capture):
+            engine.simulate_half_inning(state, lineup, base_pitcher)
+
+        assert captured, "simulate_at_bat was never called"
+        first = captured[0]
+        assert first.hits_allowed == base_hits
+        assert first.walks_allowed == base_walks
+        assert first.home_runs_allowed == base_hrs
+
+
+class TestAdvanceGamePitcherLookup:
+    """Static checks proving GameScreen.advance_game uses resolve_pitcher_stats."""
+
+    def _read_advance_game_body(self) -> str:
+        """Return the source text of GameScreen.advance_game (body, not def line).
+
+        Slices src/tui/screens/game_screen.py from 'def advance_game' (exclusive)
+        to the next sibling '    def ' (the next method on the class). This
+        matches the awk-scoped acceptance check in the plan: it captures only
+        the function body, not the rest of the file (where line 720 legitimately
+        uses lineup.starting_pitcher_id to filter the reliever list).
+        """
+        import re
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parent.parent / "src" / "tui" / "screens" / "game_screen.py"
+        text = path.read_text(encoding="utf-8")
+
+        # Find 'def advance_game' (skip the def-line itself, capture body)
+        start_match = re.search(r"    def advance_game\s*\(", text)
+        assert start_match, "could not locate GameScreen.advance_game"
+        body_start = text.index("\n", start_match.end()) + 1
+
+        # Find the next sibling method `    def ` (4-space indent — class member)
+        end_match = re.search(r"^    def ", text[body_start:], re.MULTILINE)
+        assert end_match, "could not locate next sibling method after advance_game"
+        body_end = body_start + end_match.start()
+
+        return text[body_start:body_end]
+
+    def test_helper_replaces_starting_pitcher_id_in_advance_game(self):
+        """advance_game body must call resolve_pitcher_stats and NOT touch starting_pitcher_id."""
+        body = self._read_advance_game_body()
+        assert "starting_pitcher_id" not in body, (
+            "advance_game body still references starting_pitcher_id — "
+            "should use resolve_pitcher_stats instead"
+        )
+        assert "resolve_pitcher_stats" in body, (
+            "advance_game body does not call resolve_pitcher_stats — "
+            "TUI hot path still bypasses GameState pitcher / fatigue"
+        )

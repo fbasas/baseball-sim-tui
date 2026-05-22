@@ -16,7 +16,7 @@ from textual.timer import Timer
 from textual.widgets import Footer
 
 from src.data.lahman import LahmanRepository
-from src.game.engine import GameEngine, check_game_complete, transition_half_inning
+from src.game.engine import GameEngine, check_game_complete, resolve_pitcher_stats, transition_half_inning
 from src.game.fatigue import FatigueState, update_fatigue_state
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
@@ -394,8 +394,10 @@ class GameScreen(Screen):
             pitching_team = self.away_team
 
         batter_slot = batting_team.lineup.get_batter(state.current_batting_index)
-        pitcher_id = pitching_team.lineup.starting_pitcher_id
-        pitcher_stats = pitching_team.pitching_stats[pitcher_id]
+        # Resolve current pitcher + fatigue-modified stats from GameState
+        # (honors recorded pitching changes and applies fatigue per AB —
+        # closes the audit gap where the lineup's frozen pitcher was used).
+        pitcher_id, pitcher_stats = resolve_pitcher_stats(state, pitching_team)
 
         # Simulate at-bat
         result = self.engine.sim.simulate_at_bat(
