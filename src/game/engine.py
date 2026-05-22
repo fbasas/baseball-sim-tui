@@ -57,6 +57,49 @@ def apply_fatigue_modifier(
     )
 
 
+def resolve_pitcher_stats(
+    state: GameState,
+    pitching_team: 'Team',
+) -> Tuple[str, PitchingStats]:
+    """Return (pitcher_id, fatigue_modified_pitching_stats) for the current AB.
+
+    Reads the active pitcher from GameState (not from lineup.starting_pitcher_id),
+    looks up the team's PitchingStats, and applies the fatigue modifier from
+    state.current_pitcher_fatigue. Falls back to lineup.starting_pitcher_id only if
+    GameState has no pitcher set (pre-finalize edge case).
+
+    This is the single source of truth for the TUI hot path's pitcher-stats
+    lookup. GameScreen.advance_game calls this BEFORE each call to
+    engine.sim.simulate_at_bat so that (a) pitching changes recorded in
+    GameState are honored and (b) fatigue modifies hits/walks/HRs allowed.
+
+    NOTE: simulate_half_inning duplicates the fatigue application
+    (apply_fatigue_modifier per AB) because its signature accepts a
+    caller-supplied pitching_stats rather than a team. If the fatigue formula
+    changes (currently hits *= 1+f*0.5, walks *= 1+f*0.3, HRs *= 1+f*0.4),
+    BOTH this function AND simulate_half_inning's per-AB loop must be updated.
+
+    Args:
+        state: Current GameState
+        pitching_team: Team currently in the field (provides pitching_stats dict)
+
+    Returns:
+        Tuple of (pitcher_id, fatigue_modified PitchingStats)
+    """
+    pitcher_id = state.current_pitcher_id
+    if pitcher_id is None:
+        # Pre-finalize edge case: GameState not yet seeded with pitcher IDs
+        pitcher_id = pitching_team.lineup.starting_pitcher_id
+
+    base_stats = pitching_team.pitching_stats[pitcher_id]
+
+    fatigue_state = state.current_pitcher_fatigue
+    fatigue_value = fatigue_state.current_fatigue if fatigue_state else 0.0
+
+    modified_stats = apply_fatigue_modifier(base_stats, fatigue_value)
+    return pitcher_id, modified_stats
+
+
 def transition_half_inning(state: GameState) -> GameState:
     """Transition from completed half-inning to next.
 
@@ -374,10 +417,21 @@ class GameEngine:
             batting_idx = current_state.current_batting_index
             batter_slot = batting_lineup.get_batter(batting_idx)
 
+            # NOTE: This duplicates the fatigue application in resolve_pitcher_stats
+            # (used by the TUI hot path). simulate_half_inning intentionally keeps
+            # its pitching_stats signature; if the fatigue formula changes, update
+            # BOTH this call site AND resolve_pitcher_stats.
+            current_fatigue = (
+                current_state.current_pitcher_fatigue.current_fatigue
+                if current_state.current_pitcher_fatigue
+                else 0.0
+            )
+            ab_pitching_stats = apply_fatigue_modifier(pitching_stats, current_fatigue)
+
             # Simulate at-bat using Phase 1 engine
             result = self.sim.simulate_at_bat(
                 batter_slot.batting_stats,
-                pitching_stats,
+                ab_pitching_stats,
                 current_state.base_state,
                 year=batter_slot.batting_stats.year,
                 park_factor=park_factor,
