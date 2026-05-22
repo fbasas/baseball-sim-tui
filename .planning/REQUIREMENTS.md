@@ -33,8 +33,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### In-Game Decisions
 
 - [ ] **SUBS-01**: Make pitching changes during the game (partial — UI works but simulation uses starter's stats)
-- [ ] **SUBS-02**: Make pinch-hitting substitutions during the game (partial — UI not rendered)
-- [ ] **SUBS-03**: Enforce substitution rules (can't reuse removed players) (partial — display-only)
+- [x] **SUBS-02**: Make pinch-hitting substitutions during the game (partial — UI not rendered)
+- [x] **SUBS-03**: Enforce substitution rules (can't reuse removed players) (partial — display-only)
 
 ### TUI Display
 

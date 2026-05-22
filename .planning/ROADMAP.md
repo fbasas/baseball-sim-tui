@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Minimal Playable TUI** - Create dashboard interface enabling user to play through games
 - [x] **Phase 4: Substitutions & Advanced Mechanics** - Add managerial decisions for pitching changes and pinch hitters
 - [x] **Phase 5: Narrative & Polish** - Generate play-by-play text and apply visual styling
-- [ ] **Phase 6: Substitution Wiring Fixes** - Fix broken pitcher change simulation, pinch hitter UI, fatigue wiring
+- [x] **Phase 6: Substitution Wiring Fixes** - Fix broken pitcher change simulation, pinch hitter UI, fatigue wiring (completed 2026-05-22)
 - [ ] **Phase 7: Team Selection & Box Score Fixes** - Team/year selection UI, batting R column tracking
 - [ ] **Phase 8: Computer Manager** - AI manager makes substitution decisions for CPU team
 
@@ -161,7 +161,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 06-03-PLAN.md — TUI substitution wiring: render pinch hitter list, route through engine.make_substitution, reset sub_manager on replay
+- [x] 06-03-PLAN.md — TUI substitution wiring: render pinch hitter list, route through engine.make_substitution, reset sub_manager on replay
 
 ### Phase 7: Team Selection & Box Score Fixes
 
@@ -203,6 +203,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Minimal Playable TUI | 4/4 | Complete | 2026-01-29 |
 | 4. Substitutions & Advanced Mechanics | 5/5 | Complete | 2026-01-29 |
 | 5. Narrative & Polish | 4/4 | Complete | 2026-03-14 |
-| 6. Substitution Wiring Fixes | 2/3 | In Progress|  |
+| 6. Substitution Wiring Fixes | 3/3 | Complete   | 2026-05-22 |
 | 7. Team Selection & Box Score Fixes | 0/? | Planned | - |
 | 8. Computer Manager | 0/? | Planned | - |

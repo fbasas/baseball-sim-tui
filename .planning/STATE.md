@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-02-PLAN.md (TCSS baseball theme + base diamond)
-last_updated: "2026-05-22T16:57:10.120Z"
-last_activity: 2026-05-22 -- Phase 06 execution started
+stopped_at: Completed 06-03-PLAN.md Tasks 1-3 (Task 4 human-verify PENDING)
+last_updated: "2026-05-22T17:21:02.703Z"
+last_activity: 2026-05-22
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 26
-  completed_plans: 23
-  percent: 63
+  completed_plans: 26
+  percent: 75
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 06 (substitution-wiring-fixes) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 06
-Last activity: 2026-05-22 -- Phase 06 execution started
+Plan: 3 of 3
+Status: Ready to execute
+Last activity: 2026-05-22
 
-Progress: [███████████████████] 100% (23 of 23 plans complete)
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [███████████████████] 100% (23 o
 
 *Updated after each plan completion*
 | Phase 05-narrative-polish P02 | 3 | 2 tasks | 2 files |
+| Phase 06 P03 | 12 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,10 @@ Recent decisions affecting current work:
 - [Phase 05-01]: Scarcity-first greedy position assignment: positions with fewer candidates assigned first
 - [Phase 05-01]: Batting order heuristic: OBP leadoff from speed positions, AVG slot 3, SLG cleanup slot 4
 - [Phase 05-01]: Pitcher selection modal: away first, then home, default to most GS
+- [Phase ?]: [Phase 06-03] Engine owns substitution mutation; TUI is presentation-only after engine.make_substitution returns
+- [Phase ?]: [Phase 06-03] _is_away_team_for_substitution and _reset_sub_manager extracted as testable helpers (Textual-free unit tests via unbound method + SimpleNamespace mock)
+- [Phase ?]: [Phase 06-03] Auto-pick-first-pitcher fallback removed from SubstitutionMenu (intentional UX change beyond audit scope)
+- [Phase ?]: [Phase 06-03] DH-forfeiture defensive-replacement TUI selector DEFERRED; engine reachability proven via TestDHForfeitureReachability
 
 ### Pending Todos
 
@@ -141,8 +146,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-14T21:04:55.615Z
-Stopped at: Completed 05-02-PLAN.md (TCSS baseball theme + base diamond)
+Last session: 2026-05-22T17:21:02.690Z
+Stopped at: Completed 06-03-PLAN.md Tasks 1-3 (Task 4 human-verify PENDING)
 Resume file: None
 
 **When resuming Phase 4 testing:**
