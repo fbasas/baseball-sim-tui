@@ -24,7 +24,7 @@ class FatigueWidget(Static):
     Example:
         >>> widget = FatigueWidget()
         >>> widget.update_fatigue("Smith", FatigueState(batters_faced=15))
-        # Displays: Smith [████████░░] 32%
+        # Displays: Smith [########--] 32%
     """
 
     def __init__(self, **kwargs) -> None:
@@ -47,7 +47,7 @@ class FatigueWidget(Static):
     def render(self) -> str:
         """Render fatigue meter with Rich markup.
 
-        Returns bar like: [████████░░] with color based on level.
+        Returns bar like: [########--] with color based on level.
         """
         pct = int(self._fatigue_value * 100)
 
@@ -59,8 +59,8 @@ class FatigueWidget(Static):
         else:
             color = "red"
 
-        # Bar visualization (10 chars wide)
+        # Bar visualization (10 chars wide, ASCII for broad terminal support)
         filled = int(self._fatigue_value * 10)
-        bar = "█" * filled + "░" * (10 - filled)
+        bar = "#" * filled + "-" * (10 - filled)
 
-        return f"[bold]Pitcher[/bold]\n{self._pitcher_name}: [{color}]{bar}[/{color}] {pct}%"
+        return f"[bold]Pitcher[/bold]\n{self._pitcher_name}: [{color}][{bar}][/{color}] {pct}%"
