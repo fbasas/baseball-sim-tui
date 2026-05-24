@@ -801,6 +801,42 @@ class GameScreen(Screen):
         current_batter_slot = batting_team.lineup.get_batter(current_batter_index)
         current_batter_id = current_batter_slot.player_id
 
+        # Build display labels for the players being replaced so the modal
+        # can show context (who's coming out) above each list.
+        current_pitcher_player = fielding_team.get_player(current_pitcher_id)
+        if current_pitcher_player:
+            cur_p_name = f"{current_pitcher_player.name_first[0]}. {current_pitcher_player.name_last}"
+        else:
+            cur_p_name = current_pitcher_id
+        cur_p_stats = fielding_team.pitching_stats.get(current_pitcher_id)
+        if cur_p_stats and cur_p_stats.innings_pitched > 0:
+            cur_p_era = cur_p_stats.earned_runs / cur_p_stats.innings_pitched * 9
+            current_pitcher_label = f"{cur_p_name}  ERA {cur_p_era:.2f}"
+        else:
+            current_pitcher_label = cur_p_name
+
+        current_batter_player = batting_team.get_player(current_batter_id)
+        if current_batter_player:
+            cur_b_name = f"{current_batter_player.name_first[0]}. {current_batter_player.name_last}"
+        else:
+            cur_b_name = current_batter_id
+        cur_b_stats = current_batter_slot.batting_stats
+        if cur_b_stats.at_bats > 0:
+            cur_b_avg = cur_b_stats.hits / cur_b_stats.at_bats
+            denom_obp = cur_b_stats.at_bats + cur_b_stats.walks
+            cur_b_obp = (cur_b_stats.hits + cur_b_stats.walks) / denom_obp if denom_obp > 0 else 0.0
+            cur_b_slg = (
+                cur_b_stats.singles
+                + 2 * cur_b_stats.doubles
+                + 3 * cur_b_stats.triples
+                + 4 * cur_b_stats.home_runs
+            ) / cur_b_stats.at_bats
+            current_batter_label = (
+                f"{cur_b_name}  {cur_b_avg:.3f}/{cur_b_obp:.3f}/{cur_b_slg:.3f}"
+            )
+        else:
+            current_batter_label = cur_b_name
+
         # Push substitution menu modal with callback
         self.app.push_screen(
             SubstitutionMenu(
@@ -808,6 +844,8 @@ class GameScreen(Screen):
                 batters=batters,
                 current_pitcher_id=current_pitcher_id,
                 current_batter_id=current_batter_id,
+                current_pitcher_label=current_pitcher_label,
+                current_batter_label=current_batter_label,
             ),
             self._handle_substitution
         )
