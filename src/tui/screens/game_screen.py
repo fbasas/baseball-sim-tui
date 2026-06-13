@@ -672,10 +672,25 @@ class GameScreen(Screen):
     def _reset_game(self) -> None:
         """Reset game for replay.
 
-        Clears game state, hit counts, and play log.
-        Reinitializes to start of game.
+        Rebuilds both lineups with the originally chosen starters and clears
+        all per-game tracking so a replay begins from the same opening state.
+
+        This rebuild matters because a played game mutates shared team state:
+        pinch hitters replace lineup slots in place, and pitching changes are
+        recorded against GameState. Recreating a bare ``GameState()`` (as this
+        previously did) lost the starting pitchers — the dashboard showed
+        "Unknown" and the substitution menu had no pitcher to replace — and
+        left the prior game's pinch hitters in the batting order.
         """
-        self.game_state = GameState()
+        # Rebuild lineups with the chosen starters: undoes in-place pinch-hitter
+        # mutations and restores each lineup's starting_pitcher_id.
+        build_lineup(self.away_team, self.repo, pitcher_id=self._away_pitcher_id)
+        build_lineup(self.home_team, self.repo, pitcher_id=self._home_pitcher_id)
+
+        self.game_state = GameState(
+            away_pitcher_id=self.away_team.lineup.starting_pitcher_id,
+            home_pitcher_id=self.home_team.lineup.starting_pitcher_id,
+        )
         self.away_hits = 0
         self.home_hits = 0
         self._current_half_inning = (1, InningHalf.TOP)
@@ -696,12 +711,16 @@ class GameScreen(Screen):
         # fresh manager.
         self._reset_sub_manager()
 
+        # Re-seed box-score stat lines for the rebuilt lineups.
+        self._init_stat_lines()
+
         # Clear play log and add opening divider
         log = self.query_one(PlayByPlayLog)
         log.clear()
         log.add_inning_divider(1, True)
 
-        # Update widgets
+        # Refresh the (rebuilt) lineup cards and all other widgets.
+        self._update_lineup_cards()
         self._update_all_widgets()
 
     def _reset_sub_manager(self) -> None:
