@@ -117,8 +117,10 @@ class SituationWidget(Static):
         half = "Top" if state.half == InningHalf.TOP else "Bot"
         inning_str = f"{half} {self._ordinal(state.inning)}"
 
-        # Outs display
-        outs_str = f"Outs: {state.outs}"
+        # Outs display as filled/empty dots (e.g. "Outs: ● ● ○")
+        outs = max(0, min(3, state.outs))
+        dots = " ".join(["●"] * outs + ["○"] * (3 - outs))
+        outs_str = f"Outs: {dots}"
 
         # Base occupancy
         bases = state.base_state

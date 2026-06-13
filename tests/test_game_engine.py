@@ -814,16 +814,20 @@ class TestMakeSubstitutionForfeitsDH:
 
 
 class TestAdvanceGamePitcherLookup:
-    """Static checks proving GameScreen.advance_game uses resolve_pitcher_stats."""
+    """Static checks proving the at-bat hot path uses resolve_pitcher_stats.
+
+    The per-at-bat simulation lives in GameScreen._advance_one; the public
+    advance_game is a thin wrapper that pauses a running fast forward or
+    delegates here.
+    """
 
     def _read_advance_game_body(self) -> str:
-        """Return the source text of GameScreen.advance_game (body, not def line).
+        """Return the source text of GameScreen._advance_one (body, not def line).
 
-        Slices src/tui/screens/game_screen.py from 'def advance_game' (exclusive)
+        Slices src/tui/screens/game_screen.py from 'def _advance_one' (exclusive)
         to the next sibling '    def ' (the next method on the class). This
-        matches the awk-scoped acceptance check in the plan: it captures only
-        the function body, not the rest of the file (where line 720 legitimately
-        uses lineup.starting_pitcher_id to filter the reliever list).
+        captures only the function body, not the rest of the file (where the
+        reliever list legitimately uses lineup.starting_pitcher_id to filter).
         """
         import re
         from pathlib import Path
@@ -831,27 +835,27 @@ class TestAdvanceGamePitcherLookup:
         path = Path(__file__).resolve().parent.parent / "src" / "tui" / "screens" / "game_screen.py"
         text = path.read_text(encoding="utf-8")
 
-        # Find 'def advance_game' (skip the def-line itself, capture body)
-        start_match = re.search(r"    def advance_game\s*\(", text)
-        assert start_match, "could not locate GameScreen.advance_game"
+        # Find 'def _advance_one' (skip the def-line itself, capture body)
+        start_match = re.search(r"    def _advance_one\s*\(", text)
+        assert start_match, "could not locate GameScreen._advance_one"
         body_start = text.index("\n", start_match.end()) + 1
 
         # Find the next sibling method `    def ` (4-space indent — class member)
         end_match = re.search(r"^    def ", text[body_start:], re.MULTILINE)
-        assert end_match, "could not locate next sibling method after advance_game"
+        assert end_match, "could not locate next sibling method after _advance_one"
         body_end = body_start + end_match.start()
 
         return text[body_start:body_end]
 
     def test_helper_replaces_starting_pitcher_id_in_advance_game(self):
-        """advance_game body must call resolve_pitcher_stats and NOT touch starting_pitcher_id."""
+        """_advance_one body must call resolve_pitcher_stats and NOT touch starting_pitcher_id."""
         body = self._read_advance_game_body()
         assert "starting_pitcher_id" not in body, (
-            "advance_game body still references starting_pitcher_id — "
+            "_advance_one body still references starting_pitcher_id — "
             "should use resolve_pitcher_stats instead"
         )
         assert "resolve_pitcher_stats" in body, (
-            "advance_game body does not call resolve_pitcher_stats — "
+            "_advance_one body does not call resolve_pitcher_stats — "
             "TUI hot path still bypasses GameState pitcher / fatigue"
         )
 

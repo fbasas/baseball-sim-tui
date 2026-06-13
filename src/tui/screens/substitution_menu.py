@@ -1,26 +1,20 @@
 """Substitution menu modal for making pitching changes and pinch hitters.
 
-Provides a unified interface for all substitution types:
-- Tab 1: Pitching Change (shows bullpen with ERA)
-- Tab 2: Pinch Hitter (shows bench with AVG/OBP/SLG)
+A single scrolling view with two lists:
+- Pitching Change (bullpen with ERA)
+- Pinch Hitter (bench with AVG/OBP/SLG)
+
+Keyboard-driven: arrow keys move within a list, Tab switches lists, Enter
+substitutes the focused player, Esc cancels. A mouse click on a player also
+substitutes them. Commands are shown in the footer; there are no buttons.
 """
 
 from typing import Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
-from textual.message import Message
+from textual.containers import Container, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Label, Static
-
-
-class PlayerSelected(Message):
-    """Message sent when a player is clicked."""
-
-    def __init__(self, player_id: str, widget_id: str) -> None:
-        super().__init__()
-        self.player_id = player_id
-        self.widget_id = widget_id
+from textual.widgets import Footer, Label, Static
 
 
 class PlayerListItem(Static):
@@ -31,7 +25,7 @@ class PlayerListItem(Static):
     """
 
     BINDINGS = [
-        ("enter", "select", "Select"),
+        ("enter", "select", "Substitute"),
         ("up", "focus_prev", "Up"),
         ("down", "focus_next", "Down"),
         ("tab", "switch_list", "Switch List"),
@@ -64,10 +58,14 @@ class PlayerListItem(Static):
             self.can_focus = True
 
     def on_click(self) -> None:
-        """Handle click: focus the item and notify parent of selection."""
-        if self._available:
-            self.focus()
-            self.post_message(PlayerSelected(self.player_id, self.id or ""))
+        """Handle click: commit this player as the substitution immediately."""
+        if not self._available:
+            return
+        self.focus()
+        screen = self.screen
+        confirm = getattr(screen, "confirm_player", None)
+        if confirm:
+            confirm(self.player_id, self.id or "")
 
     def on_focus(self) -> None:
         """Notify the modal so it can remember the last-focused item per list."""
@@ -77,9 +75,18 @@ class PlayerListItem(Static):
             track(self)
 
     def action_select(self) -> None:
-        """Handle Enter key to select this player."""
-        if self._available:
-            self.post_message(PlayerSelected(self.player_id, self.id or ""))
+        """Handle Enter: confirm this player as the substitution immediately.
+
+        Pressing Enter on a focused, available player is unambiguous — that
+        player is the one coming in — so it commits the substitution and
+        closes the modal. A mouse click does the same thing.
+        """
+        if not self._available:
+            return
+        screen = self.screen
+        confirm = getattr(screen, "confirm_player", None)
+        if confirm:
+            confirm(self.player_id, self.id or "")
 
     def _available_siblings(self) -> List["PlayerListItem"]:
         """Return the available items in the same list, in DOM order."""
@@ -172,18 +179,6 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         margin: 1 0;
     }
 
-    #button-row {
-        width: 100%;
-        height: 3;
-        align: center middle;
-    }
-
-    #button-row Button {
-        width: auto;
-        min-width: 12;
-        margin: 0 2;
-    }
-
     PlayerListItem {
         width: 100%;
         padding: 0 1;
@@ -200,7 +195,6 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
-        ("c", "confirm", "Confirm"),
     ]
 
     def __init__(
@@ -232,12 +226,6 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
         self._current_batter = current_batter_id
         self._current_pitcher_label = current_pitcher_label
         self._current_batter_label = current_batter_label
-        self._selected_pitcher: Optional[str] = None
-        self._selected_batter: Optional[str] = None
-        # Tracks which list the most recent selection came from.
-        # Values: "pitcher", "batter", or None (nothing selected yet).
-        # Used to disambiguate confirm intent when both lists have selections.
-        self._last_selection: Optional[str] = None
         # Remembers the last focused PlayerListItem widget id within each list
         # (keys: "pitcher-list", "batter-list") so Tab can restore focus to
         # where the user left off rather than always jumping to the top.
@@ -261,9 +249,6 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
             with VerticalScroll(id="batter-list"):
                 for pid, name, slash, avail in self._batters:
                     yield PlayerListItem(pid, name, slash, avail, id=f"b-{pid}")
-            with Horizontal(id="button-row"):
-                yield Button("Confirm", id="confirm", variant="success")
-                yield Button("Cancel", id="cancel", variant="error")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -313,57 +298,21 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
                 return
 
 
-    def on_player_selected(self, message: PlayerSelected) -> None:
-        """Handle player selection click.
+    def confirm_player(self, player_id: str, widget_id: str) -> None:
+        """Commit a substitution for a single player and close the modal.
+
+        Called when the user presses Enter on (or clicks) a player. The widget
+        id prefix disambiguates the list the player came from:
+        ``p-`` → pitching change, ``b-`` → pinch hitter.
 
         Args:
-            message: PlayerSelected message with player_id and widget_id
+            player_id: The player coming in.
+            widget_id: The PlayerListItem id (``p-<id>`` or ``b-<id>``).
         """
-        # Determine if this is a pitcher or batter based on widget ID prefix
-        if message.widget_id.startswith("p-"):
-            self._selected_pitcher = message.player_id
-            self._last_selection = "pitcher"
-        elif message.widget_id.startswith("b-"):
-            self._selected_batter = message.player_id
-            self._last_selection = "batter"
-
-    def _resolve_confirm_choice(self) -> Optional[Tuple[str, str, str]]:
-        """Resolve the (sub_type, out_id, in_id) tuple to dismiss with.
-
-        Returns:
-            - ("pitching_change", current_pitcher, selected_pitcher) if a pitcher
-              is selected and no batter is (or pitcher is most recent).
-            - ("pinch_hitter", current_batter, selected_batter) if a batter is
-              selected and no pitcher is (or batter is most recent).
-            - None if nothing is selected. **No auto-fallback** — confirming
-              without a selection dismisses without making a substitution.
-        """
-        pitcher = self._selected_pitcher
-        batter = self._selected_batter
-
-        if pitcher and not batter:
-            return ("pitching_change", self._current_pitcher, pitcher)
-        if batter and not pitcher:
-            return ("pinch_hitter", self._current_batter, batter)
-        if pitcher and batter:
-            # Both selected — prefer the most recently selected
-            if self._last_selection == "batter":
-                return ("pinch_hitter", self._current_batter, batter)
-            return ("pitching_change", self._current_pitcher, pitcher)
-        # Neither selected — no auto-pick fallback (intentional UX change:
-        # the previous auto-pick-first-pitcher fallback masked selection
-        # failures and produced phantom substitutions).
-        return None
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel":
-            self.dismiss(None)
-        elif event.button.id == "confirm":
-            self.dismiss(self._resolve_confirm_choice())
+        if widget_id.startswith("p-"):
+            self.dismiss(("pitching_change", self._current_pitcher, player_id))
+        elif widget_id.startswith("b-"):
+            self.dismiss(("pinch_hitter", self._current_batter, player_id))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
-
-    def action_confirm(self) -> None:
-        """Confirm substitution with C key."""
-        self.dismiss(self._resolve_confirm_choice())

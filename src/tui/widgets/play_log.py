@@ -27,7 +27,13 @@ class PlayByPlayLog(RichLog):
         Args:
             **kwargs: Passed to parent RichLog widget.
         """
-        super().__init__(auto_scroll=True, markup=True, **kwargs)
+        # wrap=True word-wraps long plays instead of clipping them. RichLog's
+        # default min_width (78) would otherwise force every line to render at
+        # 78 cols and get cropped by the narrower play-log panel, defeating the
+        # wrap — so lower min_width to let wrapping follow the panel width.
+        super().__init__(
+            auto_scroll=True, markup=True, wrap=True, min_width=20, **kwargs
+        )
         self.id = "play-log"
 
     def add_play(self, description: str) -> None:

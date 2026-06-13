@@ -7,9 +7,10 @@ and pitching stats (IP/H/R/ER/BB/K) with Replay/New Game/Quit navigation.
 from typing import Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.binding import Binding
+from textual.containers import VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Static
+from textual.widgets import Footer, Static
 
 
 def _format_ip(outs: int) -> str:
@@ -29,12 +30,13 @@ class BoxScoreScreen(Screen):
         layout: vertical;
         background: #0d1f0d;
         color: #fffdd0;
-        overflow-y: auto;
     }
 
     #box-score-container {
         width: 100%;
-        height: auto;
+        /* 1fr (not auto) gives the scroll container a bounded viewport so it
+           can actually scroll its overflowing content with the keyboard. */
+        height: 1fr;
         padding: 1 2;
     }
 
@@ -52,26 +54,24 @@ class BoxScoreScreen(Screen):
         padding: 0 1;
     }
 
-    #box-score-buttons {
-        width: 100%;
-        height: 3;
-        align: center middle;
-        margin: 1 0;
-        dock: bottom;
-        background: #2c1810;
-    }
-
-    #box-score-buttons Button {
-        width: auto;
-        min-width: 14;
-        margin: 0 2;
+    #box-score-container:focus {
+        /* No focus border — the screen reads as a document, not a control. */
+        border: none;
     }
     """
 
     BINDINGS = [
-        ("r", "replay", "Replay"),
-        ("n", "new_game", "New Game"),
-        ("q", "quit_game", "Quit"),
+        # priority so these fire (and the hint shows in the footer) instead of
+        # being shadowed by the focused scroll container's own hidden bindings.
+        Binding("up", "scroll_up", "Scroll", show=True, priority=True),
+        Binding("down", "scroll_down", "Scroll", show=False, priority=True),
+        Binding("pageup", "page_up", "Page Up", show=False, priority=True),
+        Binding("pagedown", "page_down", "Page Down", show=False, priority=True),
+        Binding("home", "scroll_top", "Top", show=False, priority=True),
+        Binding("end", "scroll_bottom", "Bottom", show=False, priority=True),
+        Binding("r", "replay", "Replay"),
+        Binding("n", "new_game", "New Game"),
+        Binding("q", "quit_game", "Quit"),
     ]
 
     def __init__(
@@ -118,40 +118,38 @@ class BoxScoreScreen(Screen):
             yield Static(self._build_batting_table(self._home_batting), classes="box-section")
             yield Static("[bold]── Pitching ──[/bold]", classes="box-header")
             yield Static(self._build_pitching_table(), classes="box-section")
-        with Horizontal(id="box-score-buttons"):
-            yield Button("Replay (R)", id="replay", variant="primary")
-            yield Button("New Game (N)", id="new", variant="success")
-            yield Button("Quit (Q)", id="quit", variant="error")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Focus the scroll container so arrow/page keys scroll the box score."""
+        self.query_one("#box-score-container", VerticalScroll).focus()
 
     def _build_linescore(self) -> str:
         """Build newspaper-format linescore."""
-        num_innings = len(self._inning_scores)
-        if num_innings < 9:
-            num_innings = 9
+        num_innings = max(len(self._inning_scores), 9)
 
-        # Header row
-        header = "             "
+        # Pad the team-name column to the longest name (floor 13) so the inning
+        # columns line up under the header for any name length — a fixed width
+        # let long names like "New York Yankees" overflow and skew the columns.
+        name_w = max(len(self._away_name), len(self._home_name), 13)
+
+        def _row(name: str, side: int, runs: int, hits: int, errs: int) -> str:
+            row = f"{name:<{name_w}}"
+            for i in range(num_innings):
+                if i < len(self._inning_scores):
+                    row += f"{self._inning_scores[i][side]:>4}"
+                else:
+                    row += "   -"
+            row += f"    {runs:>2}  {hits:>2}  {errs:>2}"
+            return row
+
+        header = " " * name_w
         for i in range(1, num_innings + 1):
             header += f"{i:>4}"
         header += "     R   H   E"
 
-        # Away row
-        away_row = f"{self._away_name:<13}"
-        for i in range(num_innings):
-            if i < len(self._inning_scores):
-                away_row += f"{self._inning_scores[i][0]:>4}"
-            else:
-                away_row += "   -"
-        away_row += f"    {self._away_score:>2}  {self._away_hits:>2}  {self._away_errors:>2}"
-
-        # Home row
-        home_row = f"{self._home_name:<13}"
-        for i in range(num_innings):
-            if i < len(self._inning_scores):
-                home_row += f"{self._inning_scores[i][1]:>4}"
-            else:
-                home_row += "   -"
-        home_row += f"    {self._home_score:>2}  {self._home_hits:>2}  {self._home_errors:>2}"
+        away_row = _row(self._away_name, 0, self._away_score, self._away_hits, self._away_errors)
+        home_row = _row(self._home_name, 1, self._home_score, self._home_hits, self._home_errors)
 
         return f"{header}\n{away_row}\n{home_row}"
 
@@ -188,8 +186,26 @@ class BoxScoreScreen(Screen):
 
         return "\n".join(lines)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id)
+    def _container(self) -> VerticalScroll:
+        return self.query_one("#box-score-container", VerticalScroll)
+
+    def action_scroll_up(self) -> None:
+        self._container().scroll_up()
+
+    def action_scroll_down(self) -> None:
+        self._container().scroll_down()
+
+    def action_page_up(self) -> None:
+        self._container().scroll_page_up()
+
+    def action_page_down(self) -> None:
+        self._container().scroll_page_down()
+
+    def action_scroll_top(self) -> None:
+        self._container().scroll_home()
+
+    def action_scroll_bottom(self) -> None:
+        self._container().scroll_end()
 
     def action_replay(self) -> None:
         self.dismiss("replay")

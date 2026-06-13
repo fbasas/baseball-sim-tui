@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container
 from textual.reactive import reactive
 from textual.screen import Screen
@@ -51,6 +52,27 @@ class GameScreen(Screen):
     """
 
     game_state: reactive[GameState] = reactive(GameState)
+
+    BINDINGS = [
+        Binding("space", "advance", "Next Play"),
+        # Enter is an alias for Space; hidden so the footer doesn't list it twice.
+        Binding("enter", "advance", "Next Play", show=False),
+        Binding("f", "fast_forward", "Fast Fwd"),
+        Binding("s", "substitute", "Substitutions"),
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def action_advance(self) -> None:
+        """Advance one at-bat (or pause a running fast forward)."""
+        self.advance_game()
+
+    def action_fast_forward(self) -> None:
+        """Toggle fast forward."""
+        self.fast_forward()
+
+    def action_substitute(self) -> None:
+        """Open the substitution menu."""
+        self.show_substitution_menu()
 
     def __init__(self, **kwargs) -> None:
         """Initialize the game screen.
@@ -147,9 +169,19 @@ class GameScreen(Screen):
         for p in team.get_available_pitchers():
             ps = team.pitching_stats.get(p.player_id)
             gs = ps.games_started if ps else 0
+            wins = ps.wins if ps else 0
+            losses = ps.losses if ps else 0
+            era = (
+                ps.earned_runs / ps.innings_pitched * 9
+                if ps and ps.innings_pitched > 0
+                else 0.0
+            )
+            ip_outs = ps.ip_outs if ps else 0
             name = f"{p.name_last}, {p.name_first}"
-            pitchers.append((p.player_id, name, gs))
-        pitchers.sort(key=lambda x: x[2], reverse=True)
+            # gs kept as the trailing sort key; stripped before passing on
+            pitchers.append((p.player_id, name, wins, losses, era, ip_outs, gs))
+        pitchers.sort(key=lambda x: x[6], reverse=True)  # most games started first
+        pitchers = [row[:6] for row in pitchers]
 
         def on_pitcher_chosen(chosen_id: str) -> None:
             if is_away:
@@ -348,11 +380,26 @@ class GameScreen(Screen):
         return slot.player_id
 
     def advance_game(self) -> None:
+        """Advance the game by one at-bat, or pause a running fast forward.
+
+        Called when the user presses Space or Enter. If a fast forward is
+        in progress, the keypress pauses it instead of stepping (so the
+        same key both starts/stops momentum and steps manually). Otherwise
+        it simulates the next at-bat.
+        """
+        if self._fast_forward_timer:
+            self._stop_fast_forward()
+            self.query_one(PlayByPlayLog).add_play("[italic]>>> Paused[/italic]")
+            return
+        self._advance_one()
+
+    def _advance_one(self) -> None:
         """Simulate one at-bat and update state.
 
-        Called when user presses Space or Enter. Simulates the next
-        at-bat using the game engine, logs the result, and updates
-        all widgets. Handles inning transitions and game completion.
+        Simulates the next at-bat using the game engine, logs the result,
+        and updates all widgets. Handles inning transitions and game
+        completion. Shared by the manual Space/Enter action and the
+        fast-forward timer so the two paths stay in sync.
         """
         if not self.engine or not self.away_team or not self.home_team:
             return
@@ -699,21 +746,24 @@ class GameScreen(Screen):
         raise ValueError(f"Unknown sub_type: {sub_type}")
 
     def fast_forward(self) -> None:
-        """Simulate rest of game rapidly with visible updates.
+        """Toggle rapid simulation of the rest of the game.
 
-        Uses a timer to advance at ~20 plays/second (0.05s interval),
-        allowing the user to see plays scroll by in the log.
-        Stops automatically when game completes.
+        If a fast forward is already running, this pauses it. Otherwise it
+        starts a timer that advances at ~20 plays/second (0.05s interval),
+        letting the user watch plays scroll by. Stops automatically when the
+        game completes.
         """
         if self._fast_forward_timer:
-            return  # Already fast-forwarding
+            self._stop_fast_forward()
+            self.query_one(PlayByPlayLog).add_play("[italic]>>> Paused[/italic]")
+            return
 
         if check_game_complete(self.game_state):
             return  # Game already complete
 
         log = self.query_one(PlayByPlayLog)
         log.add_play("")
-        log.add_play("[italic]>>> Fast forwarding...[/italic]")
+        log.add_play("[italic]>>> Fast forwarding... (press Space or F to pause)[/italic]")
 
         self._fast_forward_timer = self.set_interval(0.05, self._fast_forward_step)
 
@@ -728,7 +778,7 @@ class GameScreen(Screen):
             self._show_game_over()
             return
 
-        self.advance_game()
+        self._advance_one()
 
     def _stop_fast_forward(self) -> None:
         """Stop fast-forward timer.

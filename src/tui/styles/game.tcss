@@ -1,8 +1,11 @@
 /* Baseball Simulation TUI - Game Dashboard Layout */
 /* Classic baseball color theme: dark green field, cream panels, brown borders, gold accents */
 
-/* Main screen uses 3-column grid */
-Screen {
+/* Main game screen uses a 3-column grid. Scoped to GameScreen (not the base
+   Screen) so the grid layout does not leak onto modal/secondary screens like
+   the pitcher-select and box-score screens, where it would override their own
+   layout and squeeze fixed-width containers into a 1fr grid cell. */
+GameScreen {
     layout: grid;
     grid-size: 3;
     grid-columns: 1fr 2fr 1fr;
