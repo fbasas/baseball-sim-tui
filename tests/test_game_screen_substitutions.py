@@ -181,6 +181,7 @@ def test_reset_game_restores_starting_pitchers_and_rebuilds_lineup():
         )
         # Bind the real helpers _reset_game depends on; stub widget-touchers.
         mock_self._reset_sub_manager = lambda: GameScreen._reset_sub_manager(mock_self)
+        mock_self._reset_tracking = lambda: GameScreen._reset_tracking(mock_self)
         mock_self._init_stat_lines = lambda: GameScreen._init_stat_lines(mock_self)
         mock_self.query_one = lambda *a, **k: _FakeLog()
         mock_self._update_lineup_cards = lambda: None

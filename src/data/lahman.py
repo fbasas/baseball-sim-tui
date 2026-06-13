@@ -263,6 +263,37 @@ class LahmanRepository:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_available_years(self) -> List[int]:
+        """Get all seasons present in the database, most recent first.
+
+        Returns:
+            List of distinct years (descending) from the Teams table.
+        """
+        cursor = self.conn.execute(
+            "SELECT DISTINCT yearID FROM Teams ORDER BY yearID DESC"
+        )
+        return [int(row["yearID"]) for row in cursor.fetchall()]
+
+    def get_teams_for_year(self, year: int) -> List[tuple]:
+        """Get all teams that played in a given season.
+
+        Args:
+            year: Season year.
+
+        Returns:
+            List of (team_id, team_name) tuples sorted by team name.
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT teamID, name
+            FROM Teams
+            WHERE yearID = ?
+            ORDER BY name
+            """,
+            (year,),
+        )
+        return [(row["teamID"], row["name"] or row["teamID"]) for row in cursor.fetchall()]
+
     def get_team_season(
         self, team_id: str, year: int
     ) -> Optional[TeamSeason]:

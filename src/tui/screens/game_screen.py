@@ -4,7 +4,6 @@ This module provides the GameScreen that orchestrates the game dashboard,
 loading teams, managing game state, and updating all widgets reactively.
 """
 
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
@@ -20,25 +19,23 @@ from src.game.engine import GameEngine, check_game_complete, resolve_pitcher_sta
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
-from src.game.lineup_builder import build_lineup, get_default_starter
+from src.game.lineup_builder import build_lineup
 from src.game.narrative import NarrativeContext, generate_inning_summary, generate_play_text, generate_substitution_text, generate_pinch_hitter_text
-from src.game.team import Team, create_lineup
+from src.game.team import Team
 from src.simulation.engine import AtBatResult
 from src.simulation.outcomes import AtBatOutcome
 
 from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget, FatigueWidget
 from .substitution_menu import SubstitutionMenu
 
-# Database path relative to this file (src/tui/screens/ -> project root -> data/)
-_DB_PATH = Path(__file__).parent.parent.parent.parent / "data" / "lahman.sqlite"
-
 
 class GameScreen(Screen):
     """Main game dashboard screen composing all widgets.
 
-    Loads historical teams, creates lineups, and provides interactive
-    gameplay where pressing Space/Enter advances one at-bat at a time.
-    All widgets update reactively when game state changes.
+    Receives an already-selected matchup (teams + starting pitchers chosen by
+    SetupFlow), builds lineups, and provides interactive gameplay where
+    pressing Space/Enter advances one at-bat at a time. All widgets update
+    reactively when game state changes.
 
     Attributes:
         game_state: Reactive GameState triggering widget updates.
@@ -47,8 +44,8 @@ class GameScreen(Screen):
         engine: GameEngine for at-bat simulation.
 
     Example:
-        >>> screen = GameScreen()
-        >>> app.push_screen(screen)  # Auto-loads 1927 Yankees vs Cubs
+        >>> screen = GameScreen(repo, away_team, home_team, away_pid, home_pid)
+        >>> app.push_screen(screen)
     """
 
     game_state: reactive[GameState] = reactive(GameState)
@@ -74,15 +71,46 @@ class GameScreen(Screen):
         """Open the substitution menu."""
         self.show_substitution_menu()
 
-    def __init__(self, **kwargs) -> None:
-        """Initialize the game screen.
+    def action_quit(self) -> None:
+        """Quit the application.
+
+        Defined on the screen because the ``q`` binding's action resolves
+        against this screen's namespace; without it the key did nothing.
+        Stops any running fast-forward timer first so its callback can't fire
+        during teardown.
+        """
+        self._stop_fast_forward()
+        self.app.exit()
+
+    def __init__(
+        self,
+        repo: LahmanRepository,
+        away_team: Team,
+        home_team: Team,
+        away_pitcher_id: str,
+        home_pitcher_id: str,
+        **kwargs,
+    ) -> None:
+        """Initialize the game screen with an already-selected matchup.
+
+        Team and pitcher selection happen before the screen is created (see
+        SetupFlow), so the screen receives the loaded teams and chosen
+        starters and just builds lineups and starts the game on mount.
 
         Args:
+            repo: Open LahmanRepository (used to (re)build lineups).
+            away_team: Loaded away team.
+            home_team: Loaded home team.
+            away_pitcher_id: Chosen away starting pitcher.
+            home_pitcher_id: Chosen home starting pitcher.
             **kwargs: Passed to parent Screen.
         """
         super().__init__(**kwargs)
-        self.away_team: Optional[Team] = None
-        self.home_team: Optional[Team] = None
+        self.repo = repo
+        self.away_team: Optional[Team] = away_team
+        self.home_team: Optional[Team] = home_team
+        self._away_pitcher_id = away_pitcher_id
+        self._home_pitcher_id = home_pitcher_id
         self.engine: Optional[GameEngine] = None
         self.away_hits = 0
         self.home_hits = 0
@@ -132,74 +160,8 @@ class GameScreen(Screen):
         return [("Loading...", "--", 0.0) for _ in range(9)]
 
     def on_mount(self) -> None:
-        """Initialize game when screen mounts."""
-        self._setup_game()
-
-    def _setup_game(self) -> None:
-        """Load teams and initialize game state.
-
-        Loads 1927 Yankees (away) vs 1927 Cubs (home) as the default
-        matchup. Shows pitcher selection for each team, then builds lineups.
-        """
-        try:
-            self.repo = LahmanRepository(str(_DB_PATH))
-
-            # Load 1927 Yankees (away) vs 1927 Cubs (home)
-            self.away_team = Team.load_from_repository(self.repo, "NYA", 1927)
-            self.home_team = Team.load_from_repository(self.repo, "CHN", 1927)
-
-            # Show pitcher selection for away team first
-            self._show_pitcher_select(self.away_team, is_away=True)
-
-        except Exception as e:
-            log = self.query_one(PlayByPlayLog)
-            log.add_play(f"Error loading game: {e}")
-
-    def _show_pitcher_select(self, team: Team, is_away: bool) -> None:
-        """Show pitcher selection modal for a team.
-
-        Args:
-            team: Team to select pitcher for.
-            is_away: True if this is the away team.
-        """
-        from .pitcher_select_screen import PitcherSelectScreen
-
-        default_pid = get_default_starter(team, self.repo)
-        pitchers = []
-        for p in team.get_available_pitchers():
-            ps = team.pitching_stats.get(p.player_id)
-            gs = ps.games_started if ps else 0
-            wins = ps.wins if ps else 0
-            losses = ps.losses if ps else 0
-            era = (
-                ps.earned_runs / ps.innings_pitched * 9
-                if ps and ps.innings_pitched > 0
-                else 0.0
-            )
-            ip_outs = ps.ip_outs if ps else 0
-            name = f"{p.name_last}, {p.name_first}"
-            # gs kept as the trailing sort key; stripped before passing on
-            pitchers.append((p.player_id, name, wins, losses, era, ip_outs, gs))
-        pitchers.sort(key=lambda x: x[6], reverse=True)  # most games started first
-        pitchers = [row[:6] for row in pitchers]
-
-        def on_pitcher_chosen(chosen_id: str) -> None:
-            if is_away:
-                self._away_pitcher_id = chosen_id or default_pid
-                # Now show pitcher selection for home team
-                self._show_pitcher_select(self.home_team, is_away=False)
-            else:
-                self._home_pitcher_id = chosen_id or default_pid
-                self._finalize_game_setup()
-
-        self.app.push_screen(
-            PitcherSelectScreen(
-                team_name=f"{team.info.year} {team.info.team_name}",
-                pitchers=pitchers,
-                default_pitcher_id=default_pid,
-            ),
-            on_pitcher_chosen,
-        )
+        """Build lineups for the selected matchup and start the game."""
+        self._finalize_game_setup()
 
     def _finalize_game_setup(self) -> None:
         """Build lineups with chosen pitchers and start the game."""
@@ -306,13 +268,12 @@ class GameScreen(Screen):
         batter_name = self._get_current_batter_name()
         situation.update_from_state(state, runner_names, batter_name)
 
-        # Update current batter highlight
-        if state.half == InningHalf.TOP:
-            self.query_one("#away-lineup", LineupCard).set_current_batter(state.away_batting_index)
-            self.query_one("#home-lineup", LineupCard).set_current_batter(-1)  # No highlight
-        else:
-            self.query_one("#away-lineup", LineupCard).set_current_batter(-1)
-            self.query_one("#home-lineup", LineupCard).set_current_batter(state.home_batting_index)
+        # Highlight each team's due batter: the team at bat shows its current
+        # batter, the fielding team shows whoever leads off when it next bats.
+        # (Passing -1 here used to wrap to index 8 and wrongly highlight the
+        # fielding team's 9th hitter.)
+        self.query_one("#away-lineup", LineupCard).set_current_batter(state.away_batting_index)
+        self.query_one("#home-lineup", LineupCard).set_current_batter(state.home_batting_index)
 
         # Update fatigue widget
         self._update_fatigue_widget()
@@ -663,8 +624,12 @@ class GameScreen(Screen):
         Args:
             choice: Button ID ("replay", "new", "quit") or None if dismissed.
         """
-        if choice == "replay" or choice == "new":
+        if choice == "replay":
             self._reset_game()
+        elif choice == "new":
+            # Hand back to the app, which tears down this game screen and
+            # re-runs team selection over the base screen.
+            self.app.restart_setup()
         elif choice == "quit":
             self.app.exit()
         # None means dismissed with Escape - do nothing
@@ -691,6 +656,27 @@ class GameScreen(Screen):
             away_pitcher_id=self.away_team.lineup.starting_pitcher_id,
             home_pitcher_id=self.home_team.lineup.starting_pitcher_id,
         )
+        self._reset_tracking()
+
+        # Re-seed box-score stat lines for the rebuilt lineups.
+        self._init_stat_lines()
+
+        # Clear play log and add opening divider
+        log = self.query_one(PlayByPlayLog)
+        log.clear()
+        log.add_inning_divider(1, True)
+
+        # Refresh the (rebuilt) lineup cards and all other widgets.
+        self._update_lineup_cards()
+        self._update_all_widgets()
+
+    def _reset_tracking(self) -> None:
+        """Clear all per-game tracking so a new or replayed game starts fresh.
+
+        Resets hit/run/error counters, streak tracking, box-score stat lines,
+        and the substitution manager (re-wiring the engine to it). Does not
+        touch game_state or lineups — callers handle those.
+        """
         self.away_hits = 0
         self.home_hits = 0
         self._current_half_inning = (1, InningHalf.TOP)
@@ -707,21 +693,8 @@ class GameScreen(Screen):
         self._current_inning_home_runs = 0
 
         # Reset substitution state so previously-removed players are again
-        # available for a replayed game, and re-wire the engine to the
-        # fresh manager.
+        # available, and re-wire the engine to the fresh manager.
         self._reset_sub_manager()
-
-        # Re-seed box-score stat lines for the rebuilt lineups.
-        self._init_stat_lines()
-
-        # Clear play log and add opening divider
-        log = self.query_one(PlayByPlayLog)
-        log.clear()
-        log.add_inning_divider(1, True)
-
-        # Refresh the (rebuilt) lineup cards and all other widgets.
-        self._update_lineup_cards()
-        self._update_all_widgets()
 
     def _reset_sub_manager(self) -> None:
         """Replace self.sub_manager with a fresh SubstitutionManager and

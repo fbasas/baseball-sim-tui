@@ -11,5 +11,6 @@ Screens:
 from .end_game_menu import EndGameMenu
 from .game_screen import GameScreen
 from .substitution_menu import SubstitutionMenu
+from .team_select_screen import TeamSelectScreen
 
-__all__ = ["EndGameMenu", "GameScreen", "SubstitutionMenu"]
+__all__ = ["EndGameMenu", "GameScreen", "SubstitutionMenu", "TeamSelectScreen"]
