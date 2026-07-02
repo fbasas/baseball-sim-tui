@@ -51,6 +51,12 @@ class SetupFlow:
 
     def _select_team(self, is_away: bool) -> None:
         role = "Away" if is_away else "Home"
+        # When picking the home side, show the away pick for context.
+        if not is_away and self.away_team is not None:
+            info = self.away_team.info
+            context = f"visiting: {info.year} {info.team_name}"
+        else:
+            context = ""
 
         def on_team_chosen(result: Optional[Tuple[str, int]]) -> None:
             if result is None:
@@ -77,7 +83,9 @@ class SetupFlow:
                 self.home_team = team
                 self._select_pitcher(self.away_team, is_away=True)
 
-        self._app.push_screen(TeamSelectScreen(role, self._repo), on_team_chosen)
+        self._app.push_screen(
+            TeamSelectScreen(role, self._repo, context=context), on_team_chosen
+        )
 
     # --- Pitcher selection ----------------------------------------------
 
@@ -117,6 +125,7 @@ class SetupFlow:
                 team_name=f"{team.info.year} {team.info.team_name}",
                 pitchers=pitchers,
                 default_pitcher_id=default_pid,
+                role="Away" if is_away else "Home",
             ),
             on_pitcher_chosen,
         )

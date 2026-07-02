@@ -8,7 +8,8 @@ Three-phase, keyboard-driven flow for a single team (away or home):
 
 Navigation is arrow-key driven: ↑/↓ move the highlight, Enter selects the
 highlighted row (and advances to the next phase), and Esc steps back one phase
-(decade-phase Esc cancels selection). The footer lists these shortcuts.
+(decade-phase Esc cancels selection). A breadcrumb trail in the dialog title
+shows where you are in the flow.
 
 The screen returns ``(team_id, year)`` when a team is chosen, or ``None`` if
 the user backs out of the decade phase.
@@ -30,22 +31,27 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
     """Modal for selecting one team-season (decade, then year, then club).
 
     Args:
-        role: "Away" or "Home" — shown in the header so the user knows which
-            side they are choosing.
+        role: "Away" or "Home" — shown in the panel title so the user knows
+            which side they are choosing.
         repo: Open LahmanRepository used to list years and teams.
+        context: Optional dim context line under the title (e.g. the already
+            chosen away team while picking the home side).
     """
 
     CSS = """
     TeamSelectScreen {
         align: center middle;
+        background: #0d160d 40%;
     }
 
     #team-select-container {
         width: 62;
         height: auto;
         max-height: 90%;
-        background: #2a1a0a;
-        border: thick #8b6914;
+        background: #121f12;
+        border: round #d4a843;
+        border-title-color: #d4a843;
+        border-title-style: bold;
         padding: 1 2;
     }
 
@@ -56,11 +62,20 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
         color: #d4a843;
     }
 
+    #team-select-context {
+        text-align: center;
+        width: 100%;
+        height: 1;
+        color: #6b7d6b;
+    }
+
     #team-option-list {
         height: auto;
         max-height: 16;
         width: 100%;
         margin: 1 0 0 0;
+        background: #121f12;
+        border: none;
     }
 
     #team-select-hint {
@@ -68,11 +83,11 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
         width: 100%;
         height: 1;
         margin: 1 0 0 0;
-        color: #8b6914;
+        color: #6b7d6b;
     }
     """
 
-    _HINT = "[#d4a843]↑/↓[/] Navigate   [#d4a843]Enter[/] Select   [#d4a843]Esc[/] Back"
+    _HINT = "[#d4a843]↑/↓[/] navigate   [#d4a843]Enter[/] select   [#d4a843]Esc[/] back"
 
     BINDINGS = [
         # priority so they fire (and show in the footer) at the screen level
@@ -83,10 +98,13 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
         Binding("escape", "back", "Back"),
     ]
 
-    def __init__(self, role: str, repo: LahmanRepository, **kwargs) -> None:
+    def __init__(
+        self, role: str, repo: LahmanRepository, context: str = "", **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self._role = role
         self._repo = repo
+        self._context_line = context
         self._years: List[int] = repo.get_available_years()  # descending
         self._decades: List[int] = sorted(
             {y // 10 * 10 for y in self._years}, reverse=True
@@ -99,6 +117,8 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
     def compose(self) -> ComposeResult:
         with Container(id="team-select-container"):
             yield Label("", id="team-select-title")
+            if self._context_line:
+                yield Label(self._context_line, id="team-select-context")
             yield OptionList(id="team-option-list")
             # Shortcut hint lives inside the dialog box (rather than only in a
             # screen-bottom Footer, which sits far below the centered modal and
@@ -106,13 +126,31 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
             yield Label(self._HINT, id="team-select-hint")
 
     def on_mount(self) -> None:
+        container = self.query_one("#team-select-container", Container)
+        container.border_title = f"⚾ {self._role.upper()} TEAM"
         self._enter_decade_phase()
+
+    def _breadcrumb(self) -> str:
+        """Render the Decade ▸ Year ▸ Team trail with the current phase lit."""
+        crumbs = []
+        for phase, label in (
+            ("decade", f"{self._chosen_decade}s" if self._chosen_decade else "Decade"),
+            ("year", str(self._chosen_year) if self._chosen_year else "Year"),
+            ("team", "Team"),
+        ):
+            if phase == self._phase:
+                crumbs.append(f"[bold #d4a843]{label}[/]")
+            else:
+                crumbs.append(f"[#6b7d6b]{label}[/]")
+        return " [#3e5c40]▸[/] ".join(crumbs)
 
     # --- Phase setup ----------------------------------------------------
 
     def _enter_decade_phase(self) -> None:
         self._phase = "decade"
-        self._set_title(f"Select {self._role} Team — Decade")
+        self._chosen_decade = None
+        self._chosen_year = None
+        self._set_title(self._breadcrumb())
         option_list = self._option_list()
         option_list.clear_options()
         for decade in self._decades:
@@ -122,7 +160,8 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
     def _enter_year_phase(self, decade: int) -> None:
         self._phase = "year"
         self._chosen_decade = decade
-        self._set_title(f"Select {self._role} Team — {decade}s")
+        self._chosen_year = None
+        self._set_title(self._breadcrumb())
         option_list = self._option_list()
         option_list.clear_options()
         for year in self._years:  # already descending
@@ -134,7 +173,7 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
         self._phase = "team"
         self._chosen_year = year
         self._teams = self._repo.get_teams_for_year(year)
-        self._set_title(f"Select {self._role} Team — {year}")
+        self._set_title(self._breadcrumb())
         option_list = self._option_list()
         option_list.clear_options()
         for team_id, name in self._teams:
@@ -149,7 +188,7 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
         return self.query_one("#team-option-list", OptionList)
 
     def _set_title(self, text: str) -> None:
-        self.query_one("#team-select-title", Label).update(f"[bold]{text}[/bold]")
+        self.query_one("#team-select-title", Label).update(text)
 
     def _focus_list(self) -> None:
         option_list = self._option_list()

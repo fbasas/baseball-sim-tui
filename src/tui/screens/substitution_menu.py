@@ -6,7 +6,7 @@ A single scrolling view with two lists:
 
 Keyboard-driven: arrow keys move within a list, Tab switches lists, Enter
 substitutes the focused player, Esc cancels. A mouse click on a player also
-substitutes them. Commands are shown in the footer; there are no buttons.
+substitutes them. Shortcuts are shown inside the dialog; there are no buttons.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Label, Static
+from textual.widgets import Label, Static
 
 
 class PlayerListItem(Static):
@@ -147,36 +147,48 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     SubstitutionMenu {
         align: center middle;
         layout: horizontal;
+        background: #0d160d 40%;
     }
 
     #sub-menu-container {
         width: 50vw;
-        min-width: 50;
+        min-width: 52;
         height: auto;
         max-height: 90%;
-        background: $surface;
-        border: thick $primary;
+        background: #121f12;
+        color: #f2ecd8;
+        border: round #d4a843;
+        border-title-color: #d4a843;
+        border-title-style: bold;
         padding: 1 2;
     }
 
-    #sub-title {
+    .sub-section-label {
+        color: #d4a843;
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    .sub-replacing {
+        color: #6b7d6b;
+    }
+
+    #pitcher-list, #batter-list {
+        height: 8;
+        width: 100%;
+        border: round #3e5c40;
+        margin: 0 0 1 0;
+        background: #0d160d;
+        scrollbar-color: #3e5c40;
+        scrollbar-background: #0d160d;
+        scrollbar-size-vertical: 1;
+    }
+
+    #sub-menu-hint {
         text-align: center;
         width: 100%;
         height: 1;
-    }
-
-    #pitcher-list {
-        height: 8;
-        width: 100%;
-        border: solid $primary-darken-2;
-        margin: 1 0;
-    }
-
-    #batter-list {
-        height: 8;
-        width: 100%;
-        border: solid $primary-darken-2;
-        margin: 1 0;
+        color: #6b7d6b;
     }
 
     PlayerListItem {
@@ -185,13 +197,20 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
     }
 
     PlayerListItem:hover {
-        background: $primary-darken-2;
+        background: #1a2b1a;
     }
 
     PlayerListItem:focus {
-        background: $accent;
+        background: #d4a843;
+        color: #1a2b1a;
+        text-style: bold;
     }
     """
+
+    _HINT = (
+        "[#d4a843]↑/↓[/] navigate   [#d4a843]Tab[/] switch list   "
+        "[#d4a843]Enter[/] substitute   [#d4a843]Esc[/] cancel"
+    )
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
@@ -233,26 +252,31 @@ class SubstitutionMenu(ModalScreen[Optional[Tuple[str, str, str]]]):
 
     def compose(self) -> ComposeResult:
         with Container(id="sub-menu-container"):
-            yield Label("[bold]═══ SUBSTITUTIONS ═══[/bold]", id="sub-title")
-            yield Label("[bold]Pitching Change[/bold]")
+            yield Label("PITCHING CHANGE", classes="sub-section-label")
             if self._current_pitcher_label:
-                yield Label(f"Replacing: [italic]{self._current_pitcher_label}[/italic]")
-            yield Label("Available relievers:")
+                yield Label(
+                    f"replacing {self._current_pitcher_label}",
+                    classes="sub-replacing",
+                )
             with VerticalScroll(id="pitcher-list"):
                 for pid, name, era, avail in self._pitchers:
                     stats = f"ERA {era:.2f}"
                     yield PlayerListItem(pid, name, stats, avail, id=f"p-{pid}")
-            yield Label("[bold]Pinch Hitter[/bold]")
+            yield Label("PINCH HITTER", classes="sub-section-label")
             if self._current_batter_label:
-                yield Label(f"Replacing: [italic]{self._current_batter_label}[/italic]")
-            yield Label("Available pinch hitters:")
+                yield Label(
+                    f"replacing {self._current_batter_label}",
+                    classes="sub-replacing",
+                )
             with VerticalScroll(id="batter-list"):
                 for pid, name, slash, avail in self._batters:
                     yield PlayerListItem(pid, name, slash, avail, id=f"b-{pid}")
-        yield Footer()
+            yield Label(self._HINT, id="sub-menu-hint")
 
     def on_mount(self) -> None:
-        """Focus the first available pitcher (or batter) so arrow keys move highlight."""
+        """Title the panel and focus the first available player."""
+        container = self.query_one("#sub-menu-container", Container)
+        container.border_title = "⚾ SUBSTITUTIONS"
         for item in self.query(PlayerListItem):
             if item._available:
                 item.focus()

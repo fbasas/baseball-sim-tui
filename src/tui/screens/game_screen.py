@@ -50,11 +50,15 @@ class GameScreen(Screen):
 
     game_state: reactive[GameState] = reactive(GameState)
 
+    # Below 110 columns the screen gets the -narrow class: game.tcss shrinks
+    # the lineup sidebars and the lineup/fatigue widgets render compact rows.
+    HORIZONTAL_BREAKPOINTS = [(0, "-narrow"), (110, "-wide")]
+
     BINDINGS = [
         Binding("space", "advance", "Next Play"),
         # Enter is an alias for Space; hidden so the footer doesn't list it twice.
         Binding("enter", "advance", "Next Play", show=False),
-        Binding("f", "fast_forward", "Fast Fwd"),
+        Binding("f", "fast_forward", "Fast-Forward"),
         Binding("s", "substitute", "Substitutions"),
         Binding("q", "quit", "Quit"),
     ]
@@ -134,9 +138,9 @@ class GameScreen(Screen):
         """Compose the three-column game layout.
 
         Layout:
-        - Top: BoxscoreWidget (team names and scores)
+        - Top: BoxscoreWidget (inning-by-inning linescore)
         - Left: Away lineup card
-        - Center: Fatigue + Situation + Play log
+        - Center: Situation + Pitcher + Play log
         - Right: Home lineup card
 
         Yields:
@@ -145,11 +149,31 @@ class GameScreen(Screen):
         yield BoxscoreWidget()
         yield LineupCard("Away", self._placeholder_lineup(), "away-lineup")
         with Container(id="center-panel"):
-            yield FatigueWidget()
             yield SituationWidget()
+            yield FatigueWidget()
             yield PlayByPlayLog()
         yield LineupCard("Home", self._placeholder_lineup(), "home-lineup")
         yield Footer()
+
+    def _set_panel_titles(self) -> None:
+        """Set border titles so each panel is labelled in the frame itself."""
+        self.query_one(BoxscoreWidget).border_title = "⚾ SCOREBOARD"
+        self.query_one(SituationWidget).border_title = "SITUATION"
+        self.query_one(FatigueWidget).border_title = "ON THE MOUND"
+        self.query_one(PlayByPlayLog).border_title = "PLAY-BY-PLAY"
+
+        away_card = self.query_one("#away-lineup", LineupCard)
+        home_card = self.query_one("#home-lineup", LineupCard)
+        if self.away_team:
+            away_card.border_title = (
+                f"{self.away_team.info.year} {self.away_team.info.team_name}"
+            )
+        away_card.border_subtitle = "AWAY"
+        if self.home_team:
+            home_card.border_title = (
+                f"{self.home_team.info.year} {self.home_team.info.team_name}"
+            )
+        home_card.border_subtitle = "HOME"
 
     def _placeholder_lineup(self) -> List[Tuple[str, str, float]]:
         """Create placeholder lineup data until teams load.
@@ -181,6 +205,7 @@ class GameScreen(Screen):
         # Initialize stat tracking for box score
         self._init_stat_lines()
 
+        self._set_panel_titles()
         self._update_lineup_cards()
         self._update_all_widgets()
 
@@ -223,7 +248,13 @@ class GameScreen(Screen):
                 name = slot.player_id
             pos = slot.position.abbreviation if hasattr(slot.position, 'abbreviation') else 'DH'
             avg = slot.batting_stats.hits / slot.batting_stats.at_bats if slot.batting_stats.at_bats > 0 else 0
-            lineup_data.append((name, pos, avg))
+            # Today's line (H-AB) once the player has come to the plate.
+            bl = self._batting_lines.get(slot.player_id)
+            if bl and (bl["AB"] > 0 or bl["BB"] > 0):
+                today = f"{bl['H']}-{bl['AB']}"
+            else:
+                today = ""
+            lineup_data.append((name, pos, avg, today))
 
         card.team_name = team.info.team_name
         card.lineup_data = lineup_data
@@ -245,7 +276,7 @@ class GameScreen(Screen):
         """Update all widgets from current game state."""
         state = self.game_state
 
-        # Update boxscore
+        # Update scoreboard linescore
         boxscore = self.query_one(BoxscoreWidget)
         if self.away_team:
             away_name = f"{self.away_team.info.year} {self.away_team.info.team_name}"
@@ -255,18 +286,41 @@ class GameScreen(Screen):
             home_name = f"{self.home_team.info.year} {self.home_team.info.team_name}"
         else:
             home_name = "Home"
+        away_cells, home_cells = self._build_linescore_cells()
         boxscore.update_from_state(
             away_name=away_name,
             home_name=home_name,
             away_runs=state.away_score,
             home_runs=state.home_score,
+            away_cells=away_cells,
+            home_cells=home_cells,
+            away_hits=self.away_hits,
+            home_hits=self.home_hits,
+            away_errors=self._away_errors,
+            home_errors=self._home_errors,
+            inning=state.inning,
+            half_top=state.half == InningHalf.TOP,
+            game_over=check_game_complete(state),
         )
 
-        # Update situation
+        # Update situation (current matchup + on-deck hitter)
         situation = self.query_one(SituationWidget)
         runner_names = self._get_runner_names()
-        batter_name = self._get_current_batter_name()
-        situation.update_from_state(state, runner_names, batter_name)
+        batting_team = self.away_team if state.half == InningHalf.TOP else self.home_team
+        batter_name, batter_detail = self._batter_display(
+            batting_team, state.current_batting_index
+        )
+        on_deck_name, on_deck_detail = self._batter_display(
+            batting_team, (state.current_batting_index + 1) % 9
+        )
+        situation.update_from_state(
+            state,
+            runner_names,
+            batter_name,
+            batter_detail=batter_detail,
+            on_deck_name=on_deck_name,
+            on_deck_detail=on_deck_detail,
+        )
 
         # Highlight each team's due batter: the team at bat shows its current
         # batter, the fielding team shows whoever leads off when it next bats.
@@ -275,8 +329,62 @@ class GameScreen(Screen):
         self.query_one("#away-lineup", LineupCard).set_current_batter(state.away_batting_index)
         self.query_one("#home-lineup", LineupCard).set_current_batter(state.home_batting_index)
 
+        # Refresh lineup cards so the "today" (H-AB) column stays live.
+        self._update_lineup_cards()
+
         # Update fatigue widget
         self._update_fatigue_widget()
+
+    def _build_linescore_cells(self):
+        """Build per-inning run cells for the scoreboard.
+
+        Completed innings come from _inning_scores; the in-progress inning
+        comes from the running _current_inning_* counters. A home bottom
+        half that is never played (home team already leads after the top of
+        the final inning) shows as "X", newspaper style.
+
+        Returns:
+            Tuple of (away_cells, home_cells) lists.
+        """
+        state = self.game_state
+        away_cells: List = [a for a, _ in self._inning_scores]
+        home_cells: List = [h for _, h in self._inning_scores]
+
+        if state.inning > len(self._inning_scores):
+            away_cells.append(self._current_inning_away_runs)
+            if state.half == InningHalf.BOTTOM:
+                home_cells.append(self._current_inning_home_runs)
+            elif check_game_complete(state):
+                home_cells.append("X")
+
+        return away_cells, home_cells
+
+    def _batter_display(self, team: Optional[Team], index: int):
+        """Resolve a lineup slot to (display name, "POS · .AVG") strings.
+
+        Args:
+            team: Batting team (None tolerated during setup).
+            index: Batting order index.
+
+        Returns:
+            Tuple of (name, detail); empty strings if unresolvable.
+        """
+        if not team or not team.lineup:
+            return "", ""
+        slot = team.lineup.get_batter(index)
+        player = team.get_player(slot.player_id)
+        if player:
+            name = f"{player.name_first[0]}. {player.name_last}"
+        else:
+            name = slot.player_id
+        pos = (
+            slot.position.abbreviation
+            if hasattr(slot.position, "abbreviation")
+            else "DH"
+        )
+        stats = slot.batting_stats
+        avg = stats.hits / stats.at_bats if stats.at_bats > 0 else 0.0
+        return name, f"{pos} · .{int(avg * 1000):03d}"
 
     def _update_fatigue_widget(self) -> None:
         """Update fatigue widget with current pitcher info."""
@@ -327,18 +435,6 @@ class GameScreen(Screen):
             player = batting_team.get_player(player_id)
             names[base] = player.name_last if player else player_id
         return names
-
-    def _get_current_batter_name(self) -> str:
-        """Resolve the current batter to a display name."""
-        state = self.game_state
-        batting_team = self.away_team if state.half == InningHalf.TOP else self.home_team
-        if not batting_team or not batting_team.lineup:
-            return ""
-        slot = batting_team.lineup.get_batter(state.current_batting_index)
-        player = batting_team.get_player(slot.player_id)
-        if player:
-            return f"{player.name_first[0]}. {player.name_last}"
-        return slot.player_id
 
     def advance_game(self) -> None:
         """Advance the game by one at-bat, or pause a running fast forward.
@@ -504,9 +600,13 @@ class GameScreen(Screen):
         # Apply Rich markup based on outcome
         log = self.query_one(PlayByPlayLog)
         if result.outcome == AtBatOutcome.HOME_RUN:
-            log.add_play(f"[bold yellow]{text}[/bold yellow]")
+            log.add_play(f"[bold #ffd75f]{text}[/]")
         elif result.outcome == AtBatOutcome.REACHED_ON_ERROR:
-            log.add_play(f"[bold red]{text}[/bold red]")
+            log.add_play(f"[bold #d75f5f]{text}[/]")
+        elif result.outcome.is_hit:
+            log.add_play(f"[#7ec97e]{text}[/]")
+        elif result.runs_scored > 0:
+            log.add_play(f"[bold]{text}[/]")
         else:
             log.add_play(text)
 

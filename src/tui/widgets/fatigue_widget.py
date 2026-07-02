@@ -1,6 +1,7 @@
 """Fatigue meter widget displaying pitcher tiredness.
 
-Shows a visual bar and percentage indicating current pitcher fatigue level.
+Shows the current pitcher with a visual fatigue bar, percentage, and
+batters-faced count.
 """
 
 from textual.widgets import Static
@@ -9,12 +10,7 @@ from src.game.fatigue import FatigueState, calculate_fatigue
 
 
 class FatigueWidget(Static):
-    """Display pitcher fatigue as visual meter.
-
-    Shows:
-    - Pitcher name
-    - Visual bar (green/yellow/red based on level)
-    - Percentage value
+    """Display the current pitcher and a fatigue meter.
 
     Color thresholds:
     - 0-30%: green (fresh)
@@ -23,8 +19,8 @@ class FatigueWidget(Static):
 
     Example:
         >>> widget = FatigueWidget()
-        >>> widget.update_fatigue("Smith", FatigueState(batters_faced=15))
-        # Displays: Smith [########--] 32%
+        >>> widget.update_fatigue("W. Hoyt", FatigueState(batters_faced=15))
+        # Displays: W. Hoyt  ███░░░░░░░░░  32%   BF 15
     """
 
     def __init__(self, **kwargs) -> None:
@@ -32,6 +28,7 @@ class FatigueWidget(Static):
         self.id = "fatigue"
         self._pitcher_name = "Pitcher"
         self._fatigue_value = 0.0
+        self._batters_faced = 0
 
     def update_fatigue(self, pitcher_name: str, fatigue_state: FatigueState) -> None:
         """Update display with new fatigue data.
@@ -42,25 +39,31 @@ class FatigueWidget(Static):
         """
         self._pitcher_name = pitcher_name
         self._fatigue_value = calculate_fatigue(fatigue_state)
+        self._batters_faced = fatigue_state.batters_faced
         self.refresh()
 
     def render(self) -> str:
-        """Render fatigue meter with Rich markup.
+        """Render the pitcher name and a colored fatigue bar.
 
-        Returns bar like: [########--] with color based on level.
+        Falls back to a shorter bar without the batters-faced count when
+        the panel is too narrow for the full line.
         """
         pct = int(self._fatigue_value * 100)
 
-        # Color based on fatigue level
         if pct < 30:
-            color = "green"
+            color = "#5fb85f"
         elif pct < 60:
-            color = "yellow"
+            color = "#d4a843"
         else:
-            color = "red"
+            color = "#d75f5f"
 
-        # Bar visualization (10 chars wide, ASCII for broad terminal support)
-        filled = int(self._fatigue_value * 10)
-        bar = "#" * filled + "-" * (10 - filled)
+        compact = 0 < self.content_size.width < 42
+        name_w, bar_w = (10, 8) if compact else (16, 12)
 
-        return f"[bold]Pitcher[/bold]\n{self._pitcher_name}: [{color}][{bar}][/{color}] {pct}%"
+        filled = int(self._fatigue_value * bar_w)
+        bar = f"[{color}]" + "█" * filled + "[dim]" + "░" * (bar_w - filled) + "[/dim][/]"
+
+        line = f"[bold]{self._pitcher_name[:name_w]:<{name_w}}[/] {bar} [{color}]{pct:>3}%[/]"
+        if not compact:
+            line += f"   [dim]BF {self._batters_faced}[/]"
+        return line

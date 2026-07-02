@@ -28,30 +28,50 @@ class BoxScoreScreen(Screen):
     CSS = """
     BoxScoreScreen {
         layout: vertical;
-        background: #0d1f0d;
-        color: #fffdd0;
+        background: #0d160d;
+        color: #f2ecd8;
+        align-horizontal: center;
     }
 
     #box-score-container {
         width: 100%;
+        max-width: 100;
         /* 1fr (not auto) gives the scroll container a bounded viewport so it
            can actually scroll its overflowing content with the keyboard. */
         height: 1fr;
         padding: 1 2;
+        scrollbar-color: #3e5c40;
+        scrollbar-background: #0d160d;
+        scrollbar-size-vertical: 1;
+    }
+
+    #box-final-banner {
+        text-align: center;
+        width: 100%;
+        color: #d4a843;
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    #box-final-score {
+        text-align: center;
+        width: 100%;
+        margin: 0 0 1 0;
     }
 
     .box-header {
-        text-align: center;
         width: 100%;
-        color: #ffd700;
+        color: #d4a843;
         text-style: bold;
-        margin: 1 0;
+        margin: 1 0 0 0;
+        padding: 0 1;
     }
 
     .box-section {
         width: 100%;
         margin: 0 0 1 0;
         padding: 0 1;
+        border: round #3e5c40;
     }
 
     #box-score-container:focus {
@@ -109,14 +129,21 @@ class BoxScoreScreen(Screen):
         self._winner = winner
 
     def compose(self) -> ComposeResult:
+        winner_name = self._away_name if self._winner == "away" else self._home_name
         with VerticalScroll(id="box-score-container"):
-            yield Static("[bold]═══════════════ FINAL ═══════════════[/bold]", classes="box-header")
+            yield Static("═══════════  ⚾ FINAL  ═══════════", id="box-final-banner")
+            yield Static(
+                f"[bold]{self._away_name} {self._away_score}, "
+                f"{self._home_name} {self._home_score}[/bold]"
+                f"   [#6b7d6b]{winner_name} win[/]",
+                id="box-final-score",
+            )
             yield Static(self._build_linescore(), classes="box-section")
-            yield Static(f"[bold]── {self._away_name} Batting ──[/bold]", classes="box-header")
+            yield Static(f"{self._away_name} BATTING", classes="box-header")
             yield Static(self._build_batting_table(self._away_batting), classes="box-section")
-            yield Static(f"[bold]── {self._home_name} Batting ──[/bold]", classes="box-header")
+            yield Static(f"{self._home_name} BATTING", classes="box-header")
             yield Static(self._build_batting_table(self._home_batting), classes="box-section")
-            yield Static("[bold]── Pitching ──[/bold]", classes="box-header")
+            yield Static("PITCHING", classes="box-header")
             yield Static(self._build_pitching_table(), classes="box-section")
         yield Footer()
 
@@ -150,13 +177,17 @@ class BoxScoreScreen(Screen):
 
         away_row = _row(self._away_name, 0, self._away_score, self._away_hits, self._away_errors)
         home_row = _row(self._home_name, 1, self._home_score, self._home_hits, self._home_errors)
+        if self._winner == "away":
+            away_row = f"[bold]{away_row}[/]"
+        else:
+            home_row = f"[bold]{home_row}[/]"
 
-        return f"{header}\n{away_row}\n{home_row}"
+        return f"[#6b7d6b]{header}[/]\n{away_row}\n{home_row}"
 
     def _build_batting_table(self, batting: List[Tuple[str, Dict[str, int]]]) -> str:
         """Build batting stats table."""
         header = f"{'Player':<18} {'AB':>3} {'R':>3} {'H':>3} {'RBI':>4} {'BB':>3} {'K':>3}"
-        lines = [header]
+        lines = [f"[#6b7d6b]{header}[/]"]
 
         totals = {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
         for name, stats in batting:
@@ -165,7 +196,10 @@ class BoxScoreScreen(Screen):
             for k in totals:
                 totals[k] += stats[k]
 
-        lines.append(f"{'TOTALS':<18} {totals['AB']:>3} {totals['R']:>3} {totals['H']:>3} {totals['RBI']:>4} {totals['BB']:>3} {totals['K']:>3}")
+        lines.append(
+            f"[bold]{'TOTALS':<18} {totals['AB']:>3} {totals['R']:>3} {totals['H']:>3}"
+            f" {totals['RBI']:>4} {totals['BB']:>3} {totals['K']:>3}[/]"
+        )
         return "\n".join(lines)
 
     def _build_pitching_table(self) -> str:
@@ -174,11 +208,21 @@ class BoxScoreScreen(Screen):
         lines = []
 
         for pitching_list, team_name in [(self._away_pitching, self._away_name), (self._home_pitching, self._home_name)]:
-            lines.append(f"  {team_name}")
-            lines.append(header)
-            for entry in pitching_list:
+            lines.append(f"[bold #d4a843]{team_name}[/]")
+            lines.append(f"[#6b7d6b]{header}[/]")
+            # Credit the decision to the team's longest outing rather than
+            # tagging every pitcher on the staff with (W)/(L).
+            decision_idx = max(
+                range(len(pitching_list)),
+                key=lambda i: pitching_list[i][1]["outs"],
+                default=None,
+            ) if pitching_list else None
+            for i, entry in enumerate(pitching_list):
                 name, stats, is_winner = entry
-                marker = " (W)" if is_winner else " (L)"
+                if i == decision_idx:
+                    marker = " (W)" if is_winner else " (L)"
+                else:
+                    marker = ""
                 ip = _format_ip(stats["outs"])
                 line = f"{name + marker:<18} {ip:>5} {stats['H']:>3} {stats['R']:>3} {stats['ER']:>3} {stats['BB']:>3} {stats['K']:>3}"
                 lines.append(line)

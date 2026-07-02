@@ -2,7 +2,8 @@
 
 Shows available pitchers sorted by games started with W-L / ERA / IP, the
 default (most games started) pre-highlighted. Keyboard-driven: arrow keys to
-move, Enter to select, Esc to use the default. Commands are shown in the footer.
+move, Enter to select, Esc to use the default. Shortcuts are shown inside
+the dialog, matching the team-select modal.
 """
 
 from typing import List, Optional, Tuple
@@ -11,7 +12,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Label, OptionList
+from textual.widgets import Label, OptionList
 from textual.widgets.option_list import Option
 
 # Column widths for the pitcher rows / header, kept in one place so the header
@@ -33,19 +34,23 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
         pitchers: List of (player_id, name, wins, losses, era, ip_outs) sorted
             by games started descending.
         default_pitcher_id: Auto-selected pitcher (most games started).
+        role: "Away" or "Home" — shown in the panel title for context.
     """
 
     CSS = """
     PitcherSelectScreen {
         align: center middle;
+        background: #0d160d 40%;
     }
 
     #pitcher-select-container {
         width: 62;
         height: auto;
         max-height: 90%;
-        background: #2a1a0a;
-        border: thick #8b6914;
+        background: #121f12;
+        border: round #d4a843;
+        border-title-color: #d4a843;
+        border-title-style: bold;
         padding: 1 2;
     }
 
@@ -60,7 +65,7 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
         width: 100%;
         height: 1;
         margin: 1 0 0 0;
-        color: #d4a843;
+        color: #6b7d6b;
     }
 
     #pitcher-option-list {
@@ -68,12 +73,27 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
         max-height: 14;
         width: 100%;
         margin: 0 0 0 0;
+        background: #121f12;
+        border: none;
+    }
+
+    #pitcher-select-hint {
+        text-align: center;
+        width: 100%;
+        height: 1;
+        margin: 1 0 0 0;
+        color: #6b7d6b;
     }
     """
 
+    _HINT = (
+        "[#d4a843]↑/↓[/] navigate   [#d4a843]Enter[/] select   "
+        "[#d4a843]Esc[/] use default [#d4a843]★[/]"
+    )
+
     BINDINGS = [
-        # priority so it fires (and shows in the footer) instead of being
-        # shadowed by the focused OptionList's own Enter binding.
+        # priority so it fires instead of being shadowed by the focused
+        # OptionList's own Enter binding.
         Binding("enter", "confirm", "Select", priority=True),
         Binding("escape", "use_default", "Use Default"),
     ]
@@ -83,12 +103,14 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
         team_name: str,
         pitchers: List[Tuple[str, str, int, int, float, int]],
         default_pitcher_id: str,
+        role: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._team_name = team_name
         self._pitchers = pitchers
         self._default_pitcher_id = default_pitcher_id
+        self._role = role
 
     @staticmethod
     def _format_ip(ip_outs: int) -> str:
@@ -107,7 +129,7 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
         wl = f"{wins}-{losses}"
         era_s = f"{era:.2f}" if era > 0 else "-"
         ip_s = self._format_ip(ip_outs)
-        marker = "  *" if pid == self._default_pitcher_id else ""
+        marker = "  [#d4a843]★[/]" if pid == self._default_pitcher_id else ""
         return (
             f"{name:<{_NAME_W}}{wl:>{_WL_W}}"
             f"{era_s:>{_ERA_W}}{ip_s:>{_IP_W}}{marker}"
@@ -116,20 +138,23 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
     def compose(self) -> ComposeResult:
         with Container(id="pitcher-select-container"):
             yield Label(
-                f"[bold]Starting Pitcher - {self._team_name}[/bold]",
+                f"[bold]{self._team_name}[/bold]",
                 id="pitcher-select-title",
             )
-            yield Label(f"[dim]{self._column_header()}[/dim]", id="pitcher-col-header")
+            yield Label(self._column_header(), id="pitcher-col-header")
             option_list = OptionList(id="pitcher-option-list")
             for pid, name, wins, losses, era, ip_outs in self._pitchers:
                 option_list.add_option(
                     Option(self._format_row(pid, name, wins, losses, era, ip_outs), id=pid)
                 )
             yield option_list
-        yield Footer()
+            yield Label(self._HINT, id="pitcher-select-hint")
 
     def on_mount(self) -> None:
         """Highlight the default pitcher and focus the list for keyboard nav."""
+        container = self.query_one("#pitcher-select-container", Container)
+        role = f" · {self._role.upper()}" if self._role else ""
+        container.border_title = f"⚾ STARTING PITCHER{role}"
         option_list = self.query_one("#pitcher-option-list", OptionList)
         for i, row in enumerate(self._pitchers):
             if row[0] == self._default_pitcher_id:

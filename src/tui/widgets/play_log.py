@@ -60,9 +60,10 @@ class PlayByPlayLog(RichLog):
             >>> log.add_inning_divider(3, True)
             # Displays: "--- Top 3rd ---"
         """
-        half = "Top" if is_top else "Bot"
+        half, marker = ("Top", "▲") if is_top else ("Bot", "▼")
         ordinal = self._ordinal(inning)
-        self.write(f"\n--- {half} {ordinal} ---\n")
+        label = f" {marker} {half} {ordinal} "
+        self.write(f"\n[bold #d4a843]──{label}{'─' * max(0, 34 - len(label))}[/]\n")
 
     def _ordinal(self, n: int) -> str:
         """Convert number to ordinal string (1st, 2nd, 3rd, etc.).

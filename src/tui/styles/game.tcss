@@ -1,83 +1,104 @@
-/* Baseball Simulation TUI - Game Dashboard Layout */
-/* Classic baseball color theme: dark green field, cream panels, brown borders, gold accents */
+/* Baseball Simulation TUI - Game Dashboard Layout
+ *
+ * Night-game theme: deep green field, cream text, gold accents.
+ * Every panel uses a round border with a gold border title so the
+ * dashboard reads as one coherent scoreboard rather than loose boxes.
+ *
+ *   background   #0d160d   (near-black green)
+ *   panel        #121f12   (panel green)
+ *   border       #3e5c40   (muted field green)
+ *   accent       #d4a843   (ballpark gold)
+ *   text         #f2ecd8   (cream)
+ */
 
-/* Main game screen uses a 3-column grid. Scoped to GameScreen (not the base
-   Screen) so the grid layout does not leak onto modal/secondary screens like
-   the pitcher-select and box-score screens, where it would override their own
-   layout and squeeze fixed-width containers into a 1fr grid cell. */
+/* Main game screen: fixed-width lineup sidebars, flexible center column.
+   Scoped to GameScreen so the grid does not leak onto modal/secondary
+   screens. */
 GameScreen {
     layout: grid;
     grid-size: 3;
-    grid-columns: 1fr 2fr 1fr;
+    grid-columns: 32 1fr 32;
     grid-rows: 1fr;
-    background: #1a3a1a;
+    background: #0d160d;
+    color: #f2ecd8;
 }
 
-/* Boxscore spans full width at top */
+/* Narrow terminals (<110 cols): give the center column room to breathe by
+   shrinking the lineup sidebars; the cards render compact rows to match. */
+GameScreen.-narrow {
+    grid-columns: 22 1fr 22;
+}
+
+/* Scoreboard linescore spans full width at top */
 #boxscore {
     column-span: 3;
-    height: 3;
+    height: 5;
     dock: top;
-    border: heavy #8b4513;
-    padding: 0 1;
-    background: #2d5a1b;
-    color: #fffdd0;
+    border: round #d4a843;
+    border-title-color: #d4a843;
+    border-title-style: bold;
+    padding: 0 2;
+    background: #121f12;
+    color: #f2ecd8;
 }
 
-/* Score change highlight */
+/* Run scored: flash the scoreboard gold */
 #boxscore.score-changed {
-    background: #ffd700;
-    color: #1a3a1a;
+    background: #d4a843;
+    color: #1a2b1a;
 }
 
-/* Left column: Away lineup */
-#away-lineup {
+/* Lineup sidebars */
+#away-lineup, #home-lineup {
     row-span: 1;
-    border: tall #8b4513;
-    padding: 1;
-    background: #f5f0dc;
-    color: #2c1810;
+    height: 100%;
+    border: round #3e5c40;
+    border-title-color: #d4a843;
+    border-subtitle-color: #6b7d6b;
+    padding: 1 1;
+    background: #121f12;
+    color: #f2ecd8;
 }
 
-/* Center column: Situation + Play log */
+/* Center column: situation + pitcher + play log */
 #center-panel {
     row-span: 1;
     layout: vertical;
-    background: #1a3a1a;
+    background: #0d160d;
+    padding: 0 1;
 }
 
 #situation {
-    height: 12;
-    border: solid #ffd700;
-    padding: 1;
-    background: #2d5a1b;
-    color: #fffdd0;
+    height: 11;
+    border: round #3e5c40;
+    border-title-color: #d4a843;
+    padding: 0 2;
+    background: #121f12;
+    color: #f2ecd8;
+}
+
+#fatigue {
+    height: 3;
+    width: 100%;
+    padding: 0 2;
+    border: round #3e5c40;
+    border-title-color: #d4a843;
+    background: #121f12;
+    color: #f2ecd8;
 }
 
 #play-log {
     height: 1fr;
-    border: solid #4a7c3f;
+    border: round #3e5c40;
+    border-title-color: #d4a843;
     padding: 0 1;
-    background: #0d1f0d;
-    color: #fffdd0;
+    background: #0d160d;
+    color: #f2ecd8;
     overflow-y: scroll;
     overflow-x: hidden;
-}
-
-/* Right column: Home lineup */
-#home-lineup {
-    row-span: 1;
-    border: tall #8b4513;
-    padding: 1;
-    background: #f5f0dc;
-    color: #2c1810;
-}
-
-/* Current batter highlight */
-.current-batter {
-    background: #ffd700;
-    color: #1a3a1a;
-    text-style: bold;
+    scrollbar-color: #3e5c40;
+    scrollbar-background: #0d160d;
+    scrollbar-size-vertical: 1;
 }
 
 /* End game menu modal */
@@ -88,9 +109,9 @@ EndGameMenu {
 #menu {
     width: 40;
     height: auto;
-    border: thick #8b4513;
-    background: #2d5a1b;
-    color: #fffdd0;
+    border: round #d4a843;
+    background: #121f12;
+    color: #f2ecd8;
     padding: 1 2;
 }
 
@@ -102,24 +123,24 @@ EndGameMenu {
 /* Substitution Menu Styles - moved to SubstitutionMenu.DEFAULT_CSS */
 /* ModalScreens don't inherit App CSS_PATH, so styles must be in DEFAULT_CSS */
 
-/* Fatigue Widget Styles */
-#fatigue {
-    height: 4;
-    width: 100%;
-    padding: 0 1;
-    border: solid #4a7c3f;
-    background: #1a3a1a;
-    color: #fffdd0;
-}
-
 /* Footer styling to match baseball theme */
 Footer {
-    background: #2c1810;
-    color: #fffdd0;
+    background: #1a2b1a;
+    color: #f2ecd8;
 }
 
-/* Header styling */
+Footer FooterKey {
+    background: #1a2b1a;
+    color: #d4a843;
+}
+
+/* Header styling (base screen behind setup modals) */
 Header {
-    background: #2c1810;
-    color: #ffd700;
+    background: #1a2b1a;
+    color: #d4a843;
+}
+
+/* Base screen behind the setup modals */
+Screen {
+    background: #0d160d;
 }
