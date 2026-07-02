@@ -42,3 +42,15 @@ Thumbs.db
 # Project specific
 data/*.sqlite
 data/*.db
+
+# Personal Claude workflow notes (machine-specific vault paths)
+CLAUDE.md
+
+# Source data archives (data/lahman.sqlite is built from these via scripts/build_lahman_db.py)
+data/*.zip
+
+# WSL artifacts from Windows downloads
+*Zone.Identifier
+
+# In-progress planning docs, local for now
+.planning/phases/02-game-flow-team-management/
