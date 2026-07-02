@@ -76,6 +76,10 @@ class PitchingStats:
     hit_batters: int
     batters_faced: int
     wild_pitches: int
+    saves: int = 0
+    complete_games: int = 0
+    shutouts: int = 0
+    games_finished: int = 0
 
     @property
     def innings_pitched(self) -> float:
@@ -93,3 +97,4 @@ class TeamSeason:
     team_name: str
     park_factor_batting: int = 100  # BPF from Teams table
     park_factor_pitching: int = 100  # PPF from Teams table
+    games: int = 0  # G from Teams table (season length actually played)

@@ -148,6 +148,32 @@ class TestPitchingStats:
         )
         assert abs(stats.innings_pitched - 66.67) < 0.01
 
+    def test_role_fields_default_to_zero(self):
+        """SV/CG/SHO/GF default to 0 so existing constructors keep working."""
+        stats = PitchingStats(
+            player_id="test02",
+            year=2023,
+            team_id="NYA",
+            games=30,
+            games_started=30,
+            wins=15,
+            losses=8,
+            ip_outs=600,
+            hits_allowed=180,
+            runs_allowed=80,
+            earned_runs=75,
+            home_runs_allowed=20,
+            walks_allowed=50,
+            strikeouts=200,
+            hit_batters=5,
+            batters_faced=800,
+            wild_pitches=5,
+        )
+        assert stats.saves == 0
+        assert stats.complete_games == 0
+        assert stats.shutouts == 0
+        assert stats.games_finished == 0
+
 
 class TestPlayerInfo:
     """Tests for PlayerInfo dataclass."""
@@ -245,6 +271,22 @@ class TestLahmanRepository:
         assert stats is not None
         assert stats.player_id == "johnswa01"
         assert stats.year == 1913
+
+    def test_get_pitching_stats_role_fields(self, lahman_repo):
+        """SV/CG/SHO/GF are read from the Pitching table."""
+        # Waite Hoyt, 1927 Yankees workhorse: 23 CG, 3 SHO
+        hoyt = lahman_repo.get_pitching_stats("hoytwa01", 1927)
+        assert hoyt is not None
+        assert hoyt.complete_games == 23
+        assert hoyt.shutouts == 3
+        assert hoyt.games_finished == 4
+
+        # Aroldis Chapman 2016 (NYA+CHN stints summed): 36 SV, 0 CG
+        chapman = lahman_repo.get_pitching_stats("chapmar01", 2016)
+        assert chapman is not None
+        assert chapman.saves == 36
+        assert chapman.complete_games == 0
+        assert chapman.games_finished > 30
 
     def test_get_pitching_stats_not_found(self, lahman_repo):
         """Returns None for non-pitcher or wrong year."""

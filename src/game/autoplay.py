@@ -1,0 +1,170 @@
+"""Headless AI-vs-AI game runner.
+
+Plays complete games with both dugouts run by the manager AI, using the same
+seams as the TUI hot path (resolve_pitcher_stats, engine._apply_result, the
+make_substitution seam, and the manager adapter's build_view). Used by the
+end-to-end sanity tests and handy for tuning heuristics from the CLI.
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+from src.game.engine import (
+    GameEngine,
+    check_game_complete,
+    resolve_pitcher_stats,
+    transition_half_inning,
+)
+from src.game.manager_adapter import TeamManagerContext, ai_pregame, build_view
+from src.game.positions import Position
+from src.game.state import GameState, InningHalf
+from src.game.substitutions import SubstitutionManager
+from src.game.team import Team
+
+# Hard cap on plate appearances per game — a runaway-extra-innings backstop
+# far above anything a real game produces.
+_MAX_PLATE_APPEARANCES = 1500
+
+
+@dataclass
+class DecisionEvent:
+    """One manager decision made during an autoplayed game."""
+
+    side: str            # "away" | "home"
+    inning: int
+    kind: str            # "pitching_change" | "pinch_hit"
+    player_out: str
+    player_in: str
+    reason: str
+
+
+@dataclass
+class AutoGameResult:
+    """Outcome and usage data from one AI-vs-AI game."""
+
+    away_score: int
+    home_score: int
+    innings: int
+    away_workloads: Dict[str, int] = field(default_factory=dict)  # pid -> BF
+    home_workloads: Dict[str, int] = field(default_factory=dict)
+    away_pitcher_outs: Dict[str, int] = field(default_factory=dict)
+    home_pitcher_outs: Dict[str, int] = field(default_factory=dict)
+    away_starter: str = ""
+    home_starter: str = ""
+    decisions: List[DecisionEvent] = field(default_factory=list)
+
+
+def play_ai_game(
+    away_team: Team,
+    home_team: Team,
+    away_ctx: TeamManagerContext,
+    home_ctx: TeamManagerContext,
+    rng_seed: Optional[int] = None,
+) -> AutoGameResult:
+    """Play one complete game with the manager AI running both dugouts.
+
+    Mutates the Team lineups (as a real game does); callers replaying the
+    same Team objects get fresh AI lineups each call via ai_pregame.
+    """
+    engine = GameEngine(substitution_manager=SubstitutionManager())
+    if rng_seed is not None:
+        engine.reset_rng(rng_seed)
+
+    away_plan = ai_pregame(away_team, away_ctx)
+    home_plan = ai_pregame(home_team, home_ctx)
+
+    state = GameState(
+        away_pitcher_id=away_plan.starting_pitcher,
+        home_pitcher_id=home_plan.starting_pitcher,
+    )
+
+    result = AutoGameResult(
+        away_score=0, home_score=0, innings=0,
+        away_starter=away_plan.starting_pitcher,
+        home_starter=home_plan.starting_pitcher,
+    )
+    runs_allowed: Dict[str, int] = {}
+
+    def side_of(is_away: bool) -> Tuple[Team, TeamManagerContext, str]:
+        if is_away:
+            return away_team, away_ctx, "away"
+        return home_team, home_ctx, "home"
+
+    for _ in range(_MAX_PLATE_APPEARANCES):
+        if check_game_complete(state):
+            break
+
+        # --- Manager checks (defense, then offense), same order as the TUI
+        fielding_is_away = state.half == InningHalf.BOTTOM
+        team, ctx, side = side_of(fielding_is_away)
+        pitcher_id = state.current_pitcher_id
+        if pitcher_id:
+            view = build_view(
+                state, team, fielding_is_away, engine.sub_manager, ctx,
+                pitcher_runs_allowed=runs_allowed.get(pitcher_id, 0),
+            )
+            decision = ctx.manager.decide_defense(view)
+            if decision is not None:
+                state, _ = engine.make_substitution(
+                    state=state, team=team, is_away_team=fielding_is_away,
+                    player_out_id=decision.pitcher_out,
+                    player_in_id=decision.pitcher_in,
+                    new_position=Position.PITCHER, is_pitching_change=True,
+                )
+                result.decisions.append(DecisionEvent(
+                    side=side, inning=state.inning, kind="pitching_change",
+                    player_out=decision.pitcher_out,
+                    player_in=decision.pitcher_in, reason=decision.reason,
+                ))
+
+        batting_is_away = state.half == InningHalf.TOP
+        team, ctx, side = side_of(batting_is_away)
+        view = build_view(state, team, batting_is_away, engine.sub_manager, ctx)
+        decision = ctx.manager.decide_offense(view)
+        if decision is not None:
+            state, _ = engine.make_substitution(
+                state=state, team=team, is_away_team=batting_is_away,
+                player_out_id=decision.batter_out,
+                player_in_id=decision.batter_in,
+                new_position=None, is_pitching_change=False,
+            )
+            result.decisions.append(DecisionEvent(
+                side=side, inning=state.inning, kind="pinch_hit",
+                player_out=decision.batter_out,
+                player_in=decision.batter_in, reason=decision.reason,
+            ))
+
+        # --- Simulate the at-bat via the same seams as the TUI hot path
+        batting_team = away_team if batting_is_away else home_team
+        pitching_team = home_team if batting_is_away else away_team
+        batter_slot = batting_team.lineup.get_batter(state.current_batting_index)
+        pitcher_id, pitcher_stats = resolve_pitcher_stats(state, pitching_team)
+
+        workloads = result.home_workloads if batting_is_away else result.away_workloads
+        pitcher_outs = result.home_pitcher_outs if batting_is_away else result.away_pitcher_outs
+        workloads[pitcher_id] = workloads.get(pitcher_id, 0) + 1
+
+        ab = engine.sim.simulate_at_bat(
+            batter_slot.batting_stats,
+            pitcher_stats,
+            state.base_state,
+            year=batter_slot.batting_stats.year,
+        )
+        runs_allowed[pitcher_id] = runs_allowed.get(pitcher_id, 0) + ab.runs_scored
+
+        old_outs = state.outs
+        new_state = engine._apply_result(state, ab)
+        pitcher_outs[pitcher_id] = (
+            pitcher_outs.get(pitcher_id, 0) + (new_state.outs - old_outs)
+        )
+
+        if new_state.outs >= 3 and not check_game_complete(new_state):
+            new_state = transition_half_inning(new_state)
+        state = new_state
+    else:
+        raise RuntimeError("Game did not complete within the PA cap")
+
+    result.away_score = state.away_score
+    result.home_score = state.home_score
+    result.innings = state.inning
+    return result

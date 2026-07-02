@@ -178,8 +178,12 @@ def test_reset_game_restores_starting_pitchers_and_rebuilds_lineup():
             _home_errors=1,
             _current_inning_away_runs=1,
             _current_inning_home_runs=1,
+            # No manager AI on either side for this regression test.
+            _away_ctx=None,
+            _home_ctx=None,
         )
         # Bind the real helpers _reset_game depends on; stub widget-touchers.
+        mock_self._build_lineups = lambda: GameScreen._build_lineups(mock_self)
         mock_self._reset_sub_manager = lambda: GameScreen._reset_sub_manager(mock_self)
         mock_self._reset_tracking = lambda: GameScreen._reset_tracking(mock_self)
         mock_self._init_stat_lines = lambda: GameScreen._init_stat_lines(mock_self)

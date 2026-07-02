@@ -20,7 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Narrative & Polish** - Generate play-by-play text and apply visual styling
 - [x] **Phase 6: Substitution Wiring Fixes** - Fix broken pitcher change simulation, pinch hitter UI, fatigue wiring (completed 2026-05-22)
 - [ ] **Phase 7: Team Selection & Box Score Fixes** - Team/year selection UI, batting R column tracking
-- [ ] **Phase 8: Computer Manager** - AI manager makes substitution decisions for CPU team
+- [x] **Phase 8: Computer Manager** - Role-based manager AI (historical usage constrains, tactics optimize within) + best-of-N series with rest carryover (completed 2026-07-02)
 
 ## Phase Details
 
@@ -177,19 +177,35 @@ Plans:
 
 **Plans**: TBD
 
-### Phase 8: Computer Manager
+### Phase 8: Computer Manager (completed 2026-07-02)
 
-**Goal**: CPU opponent makes intelligent substitution decisions during its half-innings
+**Goal**: Manager AI runs any dugout the user hands it, reflecting each team's
+historical usage (roles) while optimizing tactically within what the sim
+models; best-of-N series mode carries pitcher rest between games
 **Depends on**: Phase 6
-**Requirements**: CMGR-01
-**Success Criteria** (what must be TRUE):
+**Requirements**: MGR-01 (role inference), MGR-02 (heuristic in-game decisions),
+MGR-03 (decoupled architecture), MGR-04 (decision narration), SER-01
+(best-of-N series), SER-02 (rest carryover)
+**Success Criteria** (all TRUE, verified by tests/test_autoplay_e2e.py and
+tmux playthrough):
 
-  1. CPU manager pulls pitcher when fatigue exceeds threshold or times-through-order penalty is high
-  2. CPU manager sends pinch hitter in late innings when trailing and weak hitter is due up
-  3. CPU substitution decisions appear in play log with narrative text
-  4. User still controls their own team's substitutions manually
+  1. Offline pass (`scripts/build_roles.py TEAM YEAR`) infers rotation order,
+     bullpen roles, bench roles, and era-scaled workload leashes from Lahman
+  2. AI manager pulls pitchers at era-appropriate leashes (1927 workhorses
+     ~28+ BF/start, 2016 starters hooked near ~25 BF; TTO quick hook is
+     modern-only), picks role-appropriate relievers (closer in save spots
+     only), and pinch-hits weak bats late when trailing
+  3. AI decisions appear in the play log with the manager's reasoning
+  4. User controls exactly the sides not handed to the AI (none/one/both)
+  5. Best-of-N (3/5/7) series: game 2 starts the #2 rotation slot because
+     game 1's starter is resting; relievers sit after back-to-backs
+  6. `src/manager/` has zero imports from src/simulation, src/game, or
+     src/tui (enforced by tests/test_manager_decoupling.py)
 
-**Plans**: TBD
+**Design**: `.planning/phases/08-computer-manager/08-PHASE-PLAN.md`
+**Deferred** (need sim support first): platoon L/R heuristics, defensive
+replacements, pinch-running, steals/bunts/IBB; Retrosheet enrichment; LLM
+role adjudication; season mode (reuses RestLedger/SeriesState).
 
 ## Progress
 

@@ -165,7 +165,11 @@ class LahmanRepository:
                 SUM(SO) as SO,
                 SUM(HBP) as HBP,
                 SUM(BFP) as BFP,
-                SUM(WP) as WP
+                SUM(WP) as WP,
+                SUM(SV) as SV,
+                SUM(CG) as CG,
+                SUM(SHO) as SHO,
+                SUM(GF) as GF
             FROM Pitching
             WHERE playerID = ? AND yearID = ?
             GROUP BY playerID, yearID
@@ -192,6 +196,10 @@ class LahmanRepository:
                 hit_batters=int(row["HBP"] or 0),
                 batters_faced=int(row["BFP"] or 0),
                 wild_pitches=int(row["WP"] or 0),
+                saves=int(row["SV"] or 0),
+                complete_games=int(row["CG"] or 0),
+                shutouts=int(row["SHO"] or 0),
+                games_finished=int(row["GF"] or 0),
             )
         return None
 
@@ -309,7 +317,7 @@ class LahmanRepository:
         """
         cursor = self.conn.execute(
             """
-            SELECT yearID, lgID, teamID, name, BPF, PPF
+            SELECT yearID, lgID, teamID, name, BPF, PPF, G
             FROM Teams
             WHERE teamID = ? AND yearID = ?
             """,
@@ -324,6 +332,7 @@ class LahmanRepository:
                 team_name=row["name"] or "",
                 park_factor_batting=int(row["BPF"] or 100),
                 park_factor_pitching=int(row["PPF"] or 100),
+                games=int(row["G"] or 0),
             )
         return None
 

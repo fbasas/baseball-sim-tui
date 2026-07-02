@@ -54,3 +54,6 @@ data/*.zip
 
 # In-progress planning docs, local for now
 .planning/phases/02-game-flow-team-management/
+
+# Generated manager-AI role artifacts (rebuild with scripts/build_roles.py)
+data/roles/

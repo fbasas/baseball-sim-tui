@@ -4,7 +4,7 @@ This module provides the GameScreen that orchestrates the game dashboard,
 loading teams, managing game state, and updating all widgets reactively.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -25,6 +25,7 @@ from src.game.team import Team
 from src.simulation.engine import AtBatResult
 from src.simulation.outcomes import AtBatOutcome
 
+from src.game.manager_adapter import TeamManagerContext, ai_pregame, build_view
 from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget, FatigueWidget
 from .substitution_menu import SubstitutionMenu
 
@@ -91,8 +92,11 @@ class GameScreen(Screen):
         repo: LahmanRepository,
         away_team: Team,
         home_team: Team,
-        away_pitcher_id: str,
-        home_pitcher_id: str,
+        away_pitcher_id: Optional[str],
+        home_pitcher_id: Optional[str],
+        away_ctx: Optional[TeamManagerContext] = None,
+        home_ctx: Optional[TeamManagerContext] = None,
+        on_game_complete: Optional[Callable[[dict], None]] = None,
         **kwargs,
     ) -> None:
         """Initialize the game screen with an already-selected matchup.
@@ -105,8 +109,14 @@ class GameScreen(Screen):
             repo: Open LahmanRepository (used to (re)build lineups).
             away_team: Loaded away team.
             home_team: Loaded home team.
-            away_pitcher_id: Chosen away starting pitcher.
-            home_pitcher_id: Chosen home starting pitcher.
+            away_pitcher_id: Chosen away starting pitcher; None for an
+                AI-managed side (its manager picks from the rotation).
+            home_pitcher_id: Chosen home starting pitcher; None for AI.
+            away_ctx: Manager AI context when the AI runs the away dugout.
+            home_ctx: Manager AI context when the AI runs the home dugout.
+            on_game_complete: Series-mode callback; when set, the end-game
+                menu reports the result upward instead of offering
+                replay/new-matchup.
             **kwargs: Passed to parent Screen.
         """
         super().__init__(**kwargs)
@@ -115,6 +125,9 @@ class GameScreen(Screen):
         self.home_team: Optional[Team] = home_team
         self._away_pitcher_id = away_pitcher_id
         self._home_pitcher_id = home_pitcher_id
+        self._away_ctx = away_ctx
+        self._home_ctx = home_ctx
+        self._on_game_complete = on_game_complete
         self.engine: Optional[GameEngine] = None
         self.away_hits = 0
         self.home_hits = 0
@@ -189,8 +202,7 @@ class GameScreen(Screen):
 
     def _finalize_game_setup(self) -> None:
         """Build lineups with chosen pitchers and start the game."""
-        build_lineup(self.away_team, self.repo, pitcher_id=self._away_pitcher_id)
-        build_lineup(self.home_team, self.repo, pitcher_id=self._home_pitcher_id)
+        self._build_lineups()
 
         # Share self.sub_manager with the engine so its validate_* checks
         # run against the same removed-players set the TUI reads from, and
@@ -210,7 +222,52 @@ class GameScreen(Screen):
         self._update_all_widgets()
 
         log = self.query_one(PlayByPlayLog)
+        self._log_pregame_decisions(log)
         log.add_inning_divider(1, True)
+
+    def _build_lineups(self) -> None:
+        """Build both lineups: manager AI for its sides, heuristic otherwise.
+
+        For an AI-managed side the manager picks the starter (rest-aware in
+        series mode) and sets the batting order from its role card; the
+        chosen starter is written back to self._*_pitcher_id so replay and
+        stat seeding use it. If the role card can't produce a legal lineup
+        for this roster, fall back to the heuristic builder.
+        """
+        self._pregame_notes: List[Tuple[str, str]] = []
+        for team, ctx, side in (
+            (self.away_team, self._away_ctx, "away"),
+            (self.home_team, self._home_ctx, "home"),
+        ):
+            if ctx is not None:
+                try:
+                    plan = ai_pregame(team, ctx)
+                except ValueError:
+                    build_lineup(team, self.repo, pitcher_id=None)
+                    plan = None
+                if plan is not None:
+                    if side == "away":
+                        self._away_pitcher_id = plan.starting_pitcher
+                    else:
+                        self._home_pitcher_id = plan.starting_pitcher
+                    self._pregame_notes.append(
+                        (team.info.team_name, plan.reason)
+                    )
+                    continue
+                # Fallback path: adopt the heuristic builder's starter
+                if side == "away":
+                    self._away_pitcher_id = team.lineup.starting_pitcher_id
+                else:
+                    self._home_pitcher_id = team.lineup.starting_pitcher_id
+            else:
+                build_lineup(team, self.repo, pitcher_id=(
+                    self._away_pitcher_id if side == "away" else self._home_pitcher_id
+                ))
+
+    def _log_pregame_decisions(self, log: PlayByPlayLog) -> None:
+        """Surface AI pregame choices (starter/lineup) in the play log."""
+        for team_name, reason in getattr(self, "_pregame_notes", []):
+            log.add_play(f"[italic #d4a843]{team_name} manager: {reason}[/]")
 
     def _init_stat_lines(self) -> None:
         """Initialize batting and pitching stat lines for all lineup players."""
@@ -491,6 +548,12 @@ class GameScreen(Screen):
             log.add_inning_divider(state.inning, state.half == InningHalf.TOP)
             self._current_half_inning = current_half
 
+        # Let AI managers act before the at-bat (pitching change for the
+        # fielding side, pinch hitter for the batting side). These mutate
+        # game_state through the engine's substitution seam, so re-read it.
+        self._run_ai_managers()
+        state = self.game_state
+
         # Get current batter and pitcher
         if state.half == InningHalf.TOP:
             batting_team = self.away_team
@@ -537,6 +600,127 @@ class GameScreen(Screen):
         # Check if game just ended (only show game over if not fast-forwarding)
         if check_game_complete(new_state) and not self._fast_forward_timer:
             self._show_game_over()
+
+    # --- Manager AI integration -----------------------------------------
+
+    def _run_ai_managers(self) -> None:
+        """Consult AI managers before an at-bat and apply their decisions.
+
+        Defense first (the fielding side may change pitchers), then offense
+        (the batting side may pinch-hit). Both route through the engine's
+        make_substitution seam — exactly the path human subs take — so all
+        legality rules apply identically.
+        """
+        state = self.game_state
+        fielding_is_away = state.half == InningHalf.BOTTOM
+
+        # Defense: pitching change check
+        ctx = self._away_ctx if fielding_is_away else self._home_ctx
+        team = self.away_team if fielding_is_away else self.home_team
+        if ctx is not None and state.current_pitcher_id:
+            runs_allowed = self._pitching_lines.get(
+                state.current_pitcher_id, {}
+            ).get("R", 0)
+            view = build_view(
+                state, team, fielding_is_away, self.sub_manager, ctx,
+                pitcher_runs_allowed=runs_allowed,
+            )
+            decision = ctx.manager.decide_defense(view)
+            if decision is not None:
+                self._apply_ai_pitching_change(team, fielding_is_away, decision)
+
+        # Offense: pinch-hit check
+        state = self.game_state
+        batting_is_away = state.half == InningHalf.TOP
+        ctx = self._away_ctx if batting_is_away else self._home_ctx
+        team = self.away_team if batting_is_away else self.home_team
+        if ctx is not None:
+            view = build_view(state, team, batting_is_away, self.sub_manager, ctx)
+            decision = ctx.manager.decide_offense(view)
+            if decision is not None:
+                self._apply_ai_pinch_hit(team, batting_is_away, decision)
+
+    def _display_name(self, team: Team, player_id: str) -> str:
+        player = team.get_player(player_id)
+        if player:
+            return f"{player.name_first[0]}. {player.name_last}"
+        return player_id
+
+    def _apply_ai_pitching_change(self, team: Team, is_away: bool, decision) -> None:
+        """Apply an AI pitching change through the engine seam and log it."""
+        log = self.query_one(PlayByPlayLog)
+        try:
+            new_state, _ = self.engine.make_substitution(
+                state=self.game_state,
+                team=team,
+                is_away_team=is_away,
+                player_out_id=decision.pitcher_out,
+                player_in_id=decision.pitcher_in,
+                new_position=Position.PITCHER,
+                is_pitching_change=True,
+            )
+        except ValueError as e:
+            log.add_play(f"[bold red]AI substitution rejected: {e}[/bold red]")
+            return
+
+        self.game_state = new_state
+        self._pitcher_consecutive_retired = 0
+
+        out_name = self._display_name(team, decision.pitcher_out)
+        in_name = self._display_name(team, decision.pitcher_in)
+        log.add_play("")
+        log.add_play(
+            f"[italic #d4a843]{team.info.team_name} manager: {decision.reason}[/]"
+        )
+        sub_text = generate_substitution_text(out_name, in_name, team.info.team_name)
+        log.add_play(f"[bold]{sub_text}[/bold]")
+        log.add_play("")
+
+    def _apply_ai_pinch_hit(self, team: Team, is_away: bool, decision) -> None:
+        """Apply an AI pinch-hit through the engine seam and log it."""
+        log = self.query_one(PlayByPlayLog)
+        try:
+            new_state, _ = self.engine.make_substitution(
+                state=self.game_state,
+                team=team,
+                is_away_team=is_away,
+                player_out_id=decision.batter_out,
+                player_in_id=decision.batter_in,
+                new_position=None,
+                is_pitching_change=False,
+            )
+        except ValueError as e:
+            log.add_play(f"[bold red]AI substitution rejected: {e}[/bold red]")
+            return
+
+        self.game_state = new_state
+
+        out_name = self._display_name(team, decision.batter_out)
+        in_name = self._display_name(team, decision.batter_in)
+        log.add_play("")
+        log.add_play(
+            f"[italic #d4a843]{team.info.team_name} manager: {decision.reason}[/]"
+        )
+        ph_text = generate_pinch_hitter_text(in_name, out_name, team.info.team_name)
+        log.add_play(f"[bold]{ph_text}[/bold]")
+        log.add_play("")
+        self._update_lineup_cards()
+
+    def _pitcher_workloads(self) -> Tuple[Dict[str, int], Dict[str, int]]:
+        """Approximate batters faced per pitcher this game, split by side.
+
+        BF ≈ outs recorded + hits + walks from the tracked pitching lines —
+        close enough for the series rest ledger.
+        """
+        away: Dict[str, int] = {}
+        home: Dict[str, int] = {}
+        for pid, line in self._pitching_lines.items():
+            bf = line["outs"] + line["H"] + line["BB"]
+            if self._pitcher_teams.get(pid) == "away":
+                away[pid] = bf
+            else:
+                home[pid] = bf
+        return away, home
 
     def _log_play(self, result: AtBatResult, team: Team, player_id: str) -> None:
         """Add broadcaster-style narrative to play log.
@@ -721,9 +905,29 @@ class GameScreen(Screen):
     def _handle_end_game_choice(self, choice: Optional[str]) -> None:
         """Handle user's end-game menu selection.
 
+        In series mode any continue-style choice reports the result to the
+        app's series controller (which owns what happens next); replaying a
+        decided series game would falsify the series record.
+
         Args:
             choice: Button ID ("replay", "new", "quit") or None if dismissed.
         """
+        if self._on_game_complete is not None:
+            if choice == "quit":
+                self.app.exit()
+                return
+            if choice is None:
+                return  # Escape: stay on the box score's screen
+            away_workloads, home_workloads = self._pitcher_workloads()
+            state = self.game_state
+            self._on_game_complete({
+                "away_score": state.away_score,
+                "home_score": state.home_score,
+                "away_workloads": away_workloads,
+                "home_workloads": home_workloads,
+            })
+            return
+
         if choice == "replay":
             self._reset_game()
         elif choice == "new":
@@ -748,9 +952,10 @@ class GameScreen(Screen):
         left the prior game's pinch hitters in the batting order.
         """
         # Rebuild lineups with the chosen starters: undoes in-place pinch-hitter
-        # mutations and restores each lineup's starting_pitcher_id.
-        build_lineup(self.away_team, self.repo, pitcher_id=self._away_pitcher_id)
-        build_lineup(self.home_team, self.repo, pitcher_id=self._home_pitcher_id)
+        # mutations and restores each lineup's starting_pitcher_id. AI sides
+        # rebuild from their role cards (deterministic, so a replay gets the
+        # same lineup).
+        self._build_lineups()
 
         self.game_state = GameState(
             away_pitcher_id=self.away_team.lineup.starting_pitcher_id,
