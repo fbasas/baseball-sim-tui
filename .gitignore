@@ -57,3 +57,6 @@ data/*.zip
 
 # Generated manager-AI role artifacts (rebuild with scripts/build_roles.py)
 data/roles/
+
+# Saved games (local user artifacts — see docs/specs/save-load-game-state.md)
+data/saves/
