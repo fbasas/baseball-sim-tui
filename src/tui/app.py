@@ -80,20 +80,32 @@ class BaseballSimApp(App):
         """Load a save from ``path`` and push the restored GameScreen.
 
         Called from the setup flow's "Load saved game" branch with the file the
-        user picked. Loads the ``SaveFile`` and reconstructs the game via the
-        replay-safe restore path (``GameScreen.restore_from``), then pushes the
-        resumed screen. Any load/restore failure — corrupt/unparseable JSON, a
-        wrong ``schema_version``, or a ``(team_id, year)`` absent from the local
-        Lahman database — is surfaced via ``notify`` and returns to the setup
-        menu rather than crashing (all are ``SaveError`` subclasses).
+        user picked. Loads the ``SaveFile`` and, per its ``kind``, reconstructs a
+        single game or an in-progress series via the replay-safe restore path,
+        then pushes the resumed screen. Any load/restore failure —
+        corrupt/unparseable JSON, a wrong ``schema_version``, or a
+        ``(team_id, year)`` absent from the local Lahman database — is surfaced
+        via ``notify`` and returns to the setup menu rather than crashing (all
+        are ``SaveError`` subclasses).
 
-        Single games only: series resume is a later part, so ``series`` is left
-        ``None`` and no manager-AI contexts are wired here. App-level matchup
-        state is synced from the save so a subsequent Ctrl+S re-save is correct.
+        App-level matchup state (``config``, teams, ``series``, manager-AI
+        contexts) is synced from the save so a subsequent Ctrl+S re-save and, in
+        series mode, the next games continue correctly.
         """
         try:
             save = load_game(path)
-            screen = GameScreen.restore_from(save, self.repo)
+            if getattr(save, "kind", "single") == "series":
+                screen = self._restore_series_game(save)
+            else:
+                screen = GameScreen.restore_from(save, self.repo)
+                self.config = save.game.config
+                self._away_team = screen.away_team
+                self._home_team = screen.home_team
+                self._away_ctx = None
+                self._home_ctx = None
+                self._away_plan = None
+                self._home_plan = None
+                self.series = None
         except SaveError as exc:
             self.notify(
                 str(exc),
@@ -104,15 +116,52 @@ class BaseballSimApp(App):
             self.start_setup()
             return
 
+        self.push_screen(screen)
+
+    def _restore_series_game(self, save) -> "GameScreen":
+        """Resume an in-progress best-of-N series from a ``kind == "series"`` save.
+
+        Rebuilds the app-level ``SeriesController`` (standings + both rest
+        ledgers) from the ``SeriesSnapshot``, restores the in-progress game via
+        the FRE-47 replay-safe path, and — critically — re-establishes the
+        series ``_on_game_complete`` wiring so finishing the resumed game records
+        the result and advances the series exactly as an unsaved one would.
+
+        The AI dugout contexts are rebuilt from the saved ``GameConfig`` (which
+        records which sides are AI) and synced to the restored ledgers + current
+        day, so both the resumed game's in-game manager calls and games 2+ stay
+        rest-aware. Returns the restored ``GameScreen`` (state is injected on
+        mount); raises ``SaveError`` on a missing team, handled by the caller.
+        """
+        controller = save.series.to_controller()
+        screen = GameScreen.restore_from(
+            save,
+            self.repo,
+            on_game_complete=self._on_series_game_complete,
+        )
+
         self.config = save.game.config
+        self.series = controller
         self._away_team = screen.away_team
         self._home_team = screen.home_team
-        self._away_ctx = None
-        self._home_ctx = None
         self._away_plan = None
         self._home_plan = None
-        self.series = None
-        self.push_screen(screen)
+
+        # Rebuild AI contexts and sync each to the restored series' rest ledger
+        # and current day (the in-progress game's day == current_day, since it
+        # is not yet recorded), mirroring _push_game's series sync.
+        self._away_ctx = self._build_context(self._away_team, self.config.away_ai)
+        self._home_ctx = self._build_context(self._home_team, self.config.home_ai)
+        day = controller.current_day
+        if self._away_ctx:
+            self._away_ctx.ledger = controller.away_ledger
+            self._away_ctx.day = day
+        if self._home_ctx:
+            self._home_ctx.ledger = controller.home_ledger
+            self._home_ctx.day = day
+        screen._away_ctx = self._away_ctx
+        screen._home_ctx = self._home_ctx
+        return screen
 
     def _on_setup_complete(
         self,
