@@ -29,6 +29,7 @@ from src.game.persistence import (
     SaveFile,
     TeamRef,
     capture_rng,
+    restore_rng,
     save_game,
     saves_dir,
 )
@@ -205,6 +206,7 @@ class GameScreen(Screen):
         away_plan: Optional[LineupPlan] = None,
         home_plan: Optional[LineupPlan] = None,
         on_game_complete: Optional[Callable[[dict], None]] = None,
+        restore: Optional[GameSnapshot] = None,
         **kwargs,
     ) -> None:
         """Initialize the game screen with an already-selected matchup.
@@ -229,6 +231,11 @@ class GameScreen(Screen):
             on_game_complete: Series-mode callback; when set, the end-game
                 menu reports the result upward instead of offering
                 replay/new-matchup.
+            restore: A saved ``GameSnapshot`` to resume from. When set, mount
+                takes the replay-safe restore path (``_finalize_restore``)
+                instead of the fresh-game rebuild — the passed ``away_team`` /
+                ``home_team`` are expected to already carry their saved lineups
+                (see :meth:`restore_from`). Normally left ``None`` for a new game.
             **kwargs: Passed to parent Screen.
         """
         super().__init__(**kwargs)
@@ -242,6 +249,7 @@ class GameScreen(Screen):
         self._away_plan = away_plan
         self._home_plan = home_plan
         self._on_game_complete = on_game_complete
+        self._restore = restore
         self.engine: Optional[GameEngine] = None
         self.away_hits = 0
         self.home_hits = 0
@@ -315,7 +323,18 @@ class GameScreen(Screen):
         self._finalize_game_setup()
 
     def _finalize_game_setup(self) -> None:
-        """Build lineups with chosen pitchers and start the game."""
+        """Build lineups with chosen pitchers and start the game.
+
+        When resuming a saved game (``self._restore`` set), take the
+        replay-safe :meth:`_finalize_restore` path instead: it injects the
+        saved state and must NOT run ``_build_lineups()`` /
+        ``_init_stat_lines()``, which would rebuild the lineups from scratch and
+        zero the box-score accumulators (the exact clobber the restore avoids).
+        """
+        if self._restore is not None:
+            self._finalize_restore()
+            return
+
         self._build_lineups()
 
         # Share self.sub_manager with the engine so its validate_* checks
@@ -338,6 +357,140 @@ class GameScreen(Screen):
         log = self.query_one(PlayByPlayLog)
         self._log_pregame_decisions(log)
         log.add_inning_divider(1, True)
+
+    # --- Restore path (resume a saved game; mirrors the spec's replay-safe
+    #     design and the FRE-8 _reset_game hazard) ------------------------
+
+    @classmethod
+    def restore_from(
+        cls,
+        save: SaveFile,
+        repo: LahmanRepository,
+        on_game_complete: Optional[Callable[[dict], None]] = None,
+        away_ctx: Optional[TeamManagerContext] = None,
+        home_ctx: Optional[TeamManagerContext] = None,
+    ) -> "GameScreen":
+        """Build a ``GameScreen`` that resumes ``save`` instead of a fresh game.
+
+        Re-hydrates both teams from their ``(team_id, year)`` refs via
+        ``SaveFile.rehydrate_teams`` (which also re-applies the *saved* lineup —
+        not ``build_lineup``), then hands the snapshot to ``__init__``'s
+        ``restore`` hook so mount injects the saved state on the replay-safe
+        path (see :meth:`_finalize_restore`). The RNG's numpy
+        ``bit_generator.state`` is restored, so the first at-bat after resume is
+        deterministic.
+
+        Args:
+            save: The loaded ``SaveFile`` (from ``persistence.load_game``).
+            repo: Open ``LahmanRepository`` for team re-hydration.
+            on_game_complete: Optional series-mode callback (as in ``__init__``).
+            away_ctx / home_ctx: Optional manager-AI contexts. Left ``None`` here
+                (this issue restores the deterministic game state; wiring the AI
+                dugouts back up belongs to the Load/Resume UI in FRE-48), but
+                accepted so that caller can supply reconstructed contexts.
+
+        Returns:
+            A ``GameScreen`` ready to be pushed; state is injected on mount.
+
+        Raises:
+            MissingTeamError: If a saved ``(team_id, year)`` is absent from the
+                local database (propagated from ``rehydrate_teams``).
+        """
+        away_team, home_team = save.rehydrate_teams(repo)
+        snapshot = save.game
+        return cls(
+            repo=repo,
+            away_team=away_team,
+            home_team=home_team,
+            # Informational only on the restore path (no _build_lineups run):
+            # the live pitcher comes from the restored GameState.
+            away_pitcher_id=away_team.lineup.starting_pitcher_id,
+            home_pitcher_id=home_team.lineup.starting_pitcher_id,
+            away_ctx=away_ctx,
+            home_ctx=home_ctx,
+            on_game_complete=on_game_complete,
+            restore=snapshot,
+        )
+
+    def _finalize_restore(self) -> None:
+        """Resume a saved game in place of the fresh-game rebuild.
+
+        Runs at mount time (widgets already composed) on the restore path:
+        injects the saved engine/state/box-score/RNG via
+        :meth:`_apply_restored_state`, renders every widget from it, and starts
+        the play log fresh with a "resumed game" marker plus a divider for the
+        current half-inning. Deliberately does NOT call ``_build_lineups`` or
+        ``_init_stat_lines`` — those would clobber the restored lineups and
+        accumulators.
+        """
+        self._apply_restored_state(self._restore)
+
+        self._set_panel_titles()
+        self._update_lineup_cards()
+        self._update_all_widgets()
+
+        # No play-by-play reconstruction (spec non-goal): start the log fresh.
+        state = self.game_state
+        log = self.query_one(PlayByPlayLog)
+        log.add_play("[italic]>>> Resumed saved game[/italic]")
+        log.add_inning_divider(state.inning, state.half == InningHalf.TOP)
+
+    def _apply_restored_state(self, snapshot: GameSnapshot) -> None:
+        """Inject a ``GameSnapshot``'s state onto this screen (replay-safe).
+
+        The self-contained, widget-free core of the restore path (unit-tested
+        with a mock ``self``). Teams must already be set on ``self`` with their
+        saved lineups applied (``restore_from`` does this). Order matters: the
+        box score is restored *before* ``game_state`` so that assigning the
+        reactive ``game_state`` re-renders widgets against the correct
+        accumulators.
+
+        Restores, per the spec's "Restore path":
+          * the ``SubstitutionManager`` (the saved one, shared into the engine
+            so no-re-entry / DH invariants continue from the save);
+          * the numpy ``bit_generator`` state (deterministic resume — not the
+            seed);
+          * every loose box-score accumulator field; and
+          * the canonical ``GameState`` (inning/half/outs/score/bases/pitchers).
+        """
+        # Install the restored SubstitutionManager and share it into a fresh
+        # engine, exactly as _finalize_game_setup wires a new game — so the
+        # engine's validate_*/record_substitution read and write the same
+        # removed-players set the TUI queries.
+        self.sub_manager = snapshot.substitutions
+        self.engine = GameEngine(substitution_manager=self.sub_manager)
+
+        # Deterministic resume: restore the generator's internal state (what a
+        # mid-game resume needs), not just the seed.
+        restore_rng(self.engine.sim.rng, snapshot.rng)
+
+        # Loose box-score accumulators that live on the screen, not the engine.
+        self._restore_box_score(snapshot.box_score)
+
+        # Assign the reactive GameState last so any watcher fires against the
+        # already-restored accumulators.
+        self.game_state = snapshot.game_state
+
+    def _restore_box_score(self, box: BoxScore) -> None:
+        """Copy a saved :class:`BoxScore` back onto the loose GameScreen fields.
+
+        The inverse of the capture that FRE-46 will do: rebuilds the linescore /
+        box-score accumulators the widgets render from. The nested per-player
+        line dicts are copied (not just the top level) so live at-bat
+        accumulation (``_log_play`` mutates a line in place) never reaches back
+        into the snapshot's box score.
+        """
+        self._batting_lines = {pid: dict(line) for pid, line in box.batting_lines.items()}
+        self._pitching_lines = {pid: dict(line) for pid, line in box.pitching_lines.items()}
+        self._pitcher_teams = dict(box.pitcher_teams)
+        self.away_hits = box.away_hits
+        self.home_hits = box.home_hits
+        self._inning_scores = list(box.inning_scores)
+        self._away_errors = box.away_errors
+        self._home_errors = box.home_errors
+        self._current_inning_away_runs = box.current_inning_away_runs
+        self._current_inning_home_runs = box.current_inning_home_runs
+        self._current_half_inning = box.current_half_inning
 
     def _build_lineups(self) -> None:
         """Build both lineups: manager AI for its sides, heuristic otherwise.
