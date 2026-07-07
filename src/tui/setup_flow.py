@@ -8,19 +8,27 @@ every choice, ``on_complete`` is called with the loaded teams, the chosen
 pitcher ids (None for AI-managed sides — the manager AI picks its own
 starter), and the GameConfig; backing out of the away team returns to the
 control question, and backing out of the mode question calls ``on_cancel``.
+
+Choosing "Load saved game" from the mode list branches out of new-game setup
+entirely: it pushes a ``SaveSelectScreen`` and, once a save is picked, calls
+``on_load`` with the chosen file's path (the app owns the load + restore + push);
+backing out of the picker returns to the mode question.
 """
 
+from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 from src.data.lahman import LahmanRepository
 from src.game.lineup_builder import build_lineup, get_default_starter
 from src.game.lineup_edit import LineupPlan
+from src.game.persistence import saves_dir
 from src.game.team import Team
 
 from .game_config import GameConfig
 from .screens.choice_screen import ChoiceScreen
 from .screens.lineup_edit_screen import LineupEditScreen
 from .screens.pitcher_select_screen import PitcherSelectScreen
+from .screens.save_select_screen import SaveSelectScreen, list_save_entries
 from .screens.team_select_screen import TeamSelectScreen
 
 _MODE_CHOICES = [
@@ -28,6 +36,7 @@ _MODE_CHOICES = [
     ("series3", "Best-of-3 series"),
     ("series5", "Best-of-5 series"),
     ("series7", "Best-of-7 series"),
+    ("load", "Load saved game — resume from disk"),
 ]
 
 def pitcher_rows(team: Team):
@@ -76,6 +85,10 @@ class SetupFlow:
             manager's edited lineup, or None for AI sides and when the auto
             lineup was accepted unchanged.
         on_cancel: Called if the user backs out of the mode selection.
+        on_load: Called as ``on_load(path)`` with the chosen save file's
+            ``Path`` when the user picks a game from the "Load saved game"
+            flow. The app performs the actual load/restore and pushes the
+            resumed ``GameScreen``. Optional — omit to disable resume.
     """
 
     def __init__(
@@ -95,11 +108,13 @@ class SetupFlow:
             None,
         ],
         on_cancel: Callable[[], None],
+        on_load: Optional[Callable[[Path], None]] = None,
     ) -> None:
         self._app = app
         self._repo = repo
         self._on_complete = on_complete
         self._on_cancel = on_cancel
+        self._on_load = on_load
         self.config: Optional[GameConfig] = None
         self.away_team: Optional[Team] = None
         self.home_team: Optional[Team] = None
@@ -117,6 +132,9 @@ class SetupFlow:
             if mode_id is None:
                 self._on_cancel()
                 return
+            if mode_id == "load":
+                self._select_saved_game()
+                return
             self._mode_id = mode_id
             self._select_control()
 
@@ -129,6 +147,29 @@ class SetupFlow:
             ),
             on_mode_chosen,
         )
+
+    def _select_saved_game(self) -> None:
+        """Show the saved-game picker, then hand the choice to ``on_load``.
+
+        Lists ``data/saves/`` newest-first and pushes a ``SaveSelectScreen``.
+        Selecting a save invokes ``on_load`` with its path (the app loads,
+        restores, and pushes the resumed game); backing out — Esc, or when
+        there are no saves — returns to the mode question. If no ``on_load``
+        was supplied, this is a safe no-op back to the menu.
+        """
+        if self._on_load is None:
+            self._select_mode()
+            return
+
+        entries = list_save_entries(saves_dir())
+
+        def on_selected(path: Optional[Path]) -> None:
+            if path is None:
+                self._select_mode()
+                return
+            self._on_load(path)
+
+        self._app.push_screen(SaveSelectScreen(entries), on_selected)
 
     def _select_control(self) -> None:
         def on_control_chosen(control_id: Optional[str]) -> None:
