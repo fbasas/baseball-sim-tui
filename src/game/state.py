@@ -79,6 +79,47 @@ class GameState:
     away_pitcher_fatigue: FatigueState = field(default_factory=FatigueState)
     home_pitcher_fatigue: FatigueState = field(default_factory=FatigueState)
 
+    def to_dict(self) -> dict:
+        """Serialize to a plain JSON-friendly dict.
+
+        The ``InningHalf`` enum is encoded by name; nested ``BaseState`` and both
+        ``FatigueState`` pieces delegate to their own ``to_dict``.
+        """
+        return {
+            "inning": self.inning,
+            "half": self.half.name,
+            "outs": self.outs,
+            "base_state": self.base_state.to_dict(),
+            "away_score": self.away_score,
+            "home_score": self.home_score,
+            "away_batting_index": self.away_batting_index,
+            "home_batting_index": self.home_batting_index,
+            "is_complete": self.is_complete,
+            "away_pitcher_id": self.away_pitcher_id,
+            "home_pitcher_id": self.home_pitcher_id,
+            "away_pitcher_fatigue": self.away_pitcher_fatigue.to_dict(),
+            "home_pitcher_fatigue": self.home_pitcher_fatigue.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GameState":
+        """Reconstruct a GameState from :meth:`to_dict` output."""
+        return cls(
+            inning=data["inning"],
+            half=InningHalf[data["half"]],
+            outs=data["outs"],
+            base_state=BaseState.from_dict(data["base_state"]),
+            away_score=data["away_score"],
+            home_score=data["home_score"],
+            away_batting_index=data["away_batting_index"],
+            home_batting_index=data["home_batting_index"],
+            is_complete=data["is_complete"],
+            away_pitcher_id=data["away_pitcher_id"],
+            home_pitcher_id=data["home_pitcher_id"],
+            away_pitcher_fatigue=FatigueState.from_dict(data["away_pitcher_fatigue"]),
+            home_pitcher_fatigue=FatigueState.from_dict(data["home_pitcher_fatigue"]),
+        )
+
     @property
     def batting_team_score(self) -> int:
         """Get the score of the team currently batting.

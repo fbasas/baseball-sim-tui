@@ -54,6 +54,25 @@ class FatigueState:
     stress_events: int = 0
     current_fatigue: float = 0.0
 
+    def to_dict(self) -> dict:
+        """Serialize to a plain JSON-friendly dict."""
+        return {
+            "batters_faced": self.batters_faced,
+            "times_through_order": self.times_through_order,
+            "stress_events": self.stress_events,
+            "current_fatigue": self.current_fatigue,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FatigueState":
+        """Reconstruct a FatigueState from :meth:`to_dict` output."""
+        return cls(
+            batters_faced=data["batters_faced"],
+            times_through_order=data["times_through_order"],
+            stress_events=data["stress_events"],
+            current_fatigue=data["current_fatigue"],
+        )
+
 
 def calculate_fatigue(
     state: FatigueState,

@@ -9,7 +9,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
 
 from src.data.models import BattingStats, PitchingStats, PlayerInfo, TeamSeason
-from src.game.positions import DesignatedHitter, Position
+from src.game.positions import (
+    DesignatedHitter,
+    Position,
+    abbrev_to_position,
+    position_to_abbrev,
+)
 
 
 @dataclass
@@ -33,6 +38,33 @@ class LineupSlot:
     player_id: str
     position: Union[Position, type]  # Position or DesignatedHitter class
     batting_stats: BattingStats
+
+    def to_dict(self) -> dict:
+        """Serialize to a JSON-friendly dict.
+
+        Only the player ID and position (as an abbreviation string) are stored;
+        ``batting_stats`` is re-hydrated from the reloaded team on ``from_dict``,
+        never serialized (rosters come from the local Lahman DB, not the save).
+        """
+        return {
+            "player_id": self.player_id,
+            "position": position_to_abbrev(self.position),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, batting_stats: BattingStats) -> "LineupSlot":
+        """Reconstruct a LineupSlot from :meth:`to_dict` output.
+
+        Args:
+            data: A dict produced by :meth:`to_dict`.
+            batting_stats: The batting stats for this slot's player, looked up
+                from the reloaded team (not carried in the save).
+        """
+        return cls(
+            player_id=data["player_id"],
+            position=abbrev_to_position(data["position"]),
+            batting_stats=batting_stats,
+        )
 
 
 @dataclass
@@ -170,6 +202,41 @@ class Lineup:
             0
         """
         return (current + 1) % 9
+
+    def to_dict(self) -> dict:
+        """Serialize the batting order + starting pitcher to a JSON-friendly dict.
+
+        Each slot stores only its player ID and position abbreviation; batting
+        stats are re-hydrated from the reloaded team on :meth:`from_dict`.
+        """
+        return {
+            "slots": [slot.to_dict() for slot in self.slots],
+            "starting_pitcher_id": self.starting_pitcher_id,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict,
+        batting_stats_by_id: Dict[str, BattingStats],
+    ) -> "Lineup":
+        """Reconstruct a Lineup from :meth:`to_dict` output.
+
+        Args:
+            data: A dict produced by :meth:`to_dict`.
+            batting_stats_by_id: Map of player_id -> BattingStats for every
+                player in the saved order, sourced from the reloaded team
+                (typically ``team.batting_stats``). Batting stats are not stored
+                in the save, so this lookup is required.
+
+        Raises:
+            KeyError: If a slot's player is missing from ``batting_stats_by_id``.
+        """
+        slots = [
+            LineupSlot.from_dict(slot, batting_stats_by_id[slot["player_id"]])
+            for slot in data["slots"]
+        ]
+        return cls(slots=slots, starting_pitcher_id=data["starting_pitcher_id"])
 
 
 @dataclass
