@@ -8,6 +8,7 @@ from textual.widgets import Header
 
 from src.data.lahman import LahmanRepository
 from src.game.lineup_builder import get_default_starter
+from src.game.lineup_edit import LineupPlan
 from src.game.team import Team
 from src.series.controller import GameWorkloads, SeriesController
 
@@ -59,6 +60,8 @@ class BaseballSimApp(App):
         self._home_team: Optional[Team] = None
         self._away_ctx: Optional[TeamManagerContext] = None
         self._home_ctx: Optional[TeamManagerContext] = None
+        self._away_plan: Optional[LineupPlan] = None
+        self._home_plan: Optional[LineupPlan] = None
         self.start_setup()
 
     def start_setup(self) -> None:
@@ -77,17 +80,29 @@ class BaseballSimApp(App):
         home_team: Team,
         away_pitcher_id: Optional[str],
         home_pitcher_id: Optional[str],
+        away_plan: Optional[LineupPlan],
+        home_plan: Optional[LineupPlan],
         config: GameConfig,
     ) -> None:
-        """Store the matchup, build AI contexts, and launch game 1."""
+        """Store the matchup, build AI contexts, and launch game 1.
+
+        ``away_plan``/``home_plan`` are the manager's edited lineups (None for
+        AI sides and for accept-the-auto-lineup). They are stored and passed
+        only into game 1; series games 2+ rebuild the auto lineup (see
+        ``_start_next_series_game``), so the editor is initial-setup-only.
+        """
         self.config = config
         self._away_team = away_team
         self._home_team = home_team
         self._away_ctx = self._build_context(away_team, config.away_ai)
         self._home_ctx = self._build_context(home_team, config.home_ai)
+        self._away_plan = away_plan
+        self._home_plan = home_plan
         if config.is_series:
             self.series = SeriesController(best_of=config.best_of)
-        self._push_game(away_pitcher_id, home_pitcher_id)
+        self._push_game(
+            away_pitcher_id, home_pitcher_id, away_plan, home_plan
+        )
 
     def _build_context(
         self, team: Team, want_ai: bool
@@ -115,9 +130,18 @@ class BaseballSimApp(App):
         return TeamManagerContext(manager=manager)
 
     def _push_game(
-        self, away_pitcher_id: Optional[str], home_pitcher_id: Optional[str]
+        self,
+        away_pitcher_id: Optional[str],
+        home_pitcher_id: Optional[str],
+        away_plan: Optional[LineupPlan] = None,
+        home_plan: Optional[LineupPlan] = None,
     ) -> None:
-        """Push a fresh GameScreen; in series mode, sync rest state first."""
+        """Push a fresh GameScreen; in series mode, sync rest state first.
+
+        ``away_plan``/``home_plan`` default to None so between-series games
+        (``_start_next_series_game``) rebuild the auto lineup; only the initial
+        game (``_on_setup_complete``) passes the manager's edited plans.
+        """
         if self.series is not None:
             day = self.series.current_day
             if self._away_ctx:
@@ -136,6 +160,8 @@ class BaseballSimApp(App):
                 home_pitcher_id,
                 away_ctx=self._away_ctx,
                 home_ctx=self._home_ctx,
+                away_plan=away_plan,
+                home_plan=home_plan,
                 on_game_complete=(
                     self._on_series_game_complete if self.series else None
                 ),

@@ -181,6 +181,9 @@ def test_reset_game_restores_starting_pitchers_and_rebuilds_lineup():
             # No manager AI on either side for this regression test.
             _away_ctx=None,
             _home_ctx=None,
+            # No manual lineup plan: both sides rebuild the auto lineup.
+            _away_plan=None,
+            _home_plan=None,
         )
         # Bind the real helpers _reset_game depends on; stub widget-touchers.
         mock_self._build_lineups = lambda: GameScreen._build_lineups(mock_self)

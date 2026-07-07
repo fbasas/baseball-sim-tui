@@ -13,11 +13,13 @@ control question, and backing out of the mode question calls ``on_cancel``.
 from typing import Callable, Optional, Tuple
 
 from src.data.lahman import LahmanRepository
-from src.game.lineup_builder import get_default_starter
+from src.game.lineup_builder import build_lineup, get_default_starter
+from src.game.lineup_edit import LineupPlan
 from src.game.team import Team
 
 from .game_config import GameConfig
 from .screens.choice_screen import ChoiceScreen
+from .screens.lineup_edit_screen import LineupEditScreen
 from .screens.pitcher_select_screen import PitcherSelectScreen
 from .screens.team_select_screen import TeamSelectScreen
 
@@ -68,8 +70,11 @@ class SetupFlow:
         app: The Textual App used to push the selection modals.
         repo: Open LahmanRepository for loading teams and pitcher data.
         on_complete: Called as ``on_complete(away_team, home_team,
-            away_pitcher_id, home_pitcher_id, config)`` once everything is
-            chosen; pitcher ids are None for AI-managed sides.
+            away_pitcher_id, home_pitcher_id, away_plan, home_plan, config)``
+            once everything is chosen; pitcher ids are None for AI-managed
+            sides, and each ``*_plan`` is an ``Optional[LineupPlan]`` — the
+            manager's edited lineup, or None for AI sides and when the auto
+            lineup was accepted unchanged.
         on_cancel: Called if the user backs out of the mode selection.
     """
 
@@ -77,7 +82,18 @@ class SetupFlow:
         self,
         app,
         repo: LahmanRepository,
-        on_complete: Callable[[Team, Team, Optional[str], Optional[str], GameConfig], None],
+        on_complete: Callable[
+            [
+                Team,
+                Team,
+                Optional[str],
+                Optional[str],
+                Optional[LineupPlan],
+                Optional[LineupPlan],
+                GameConfig,
+            ],
+            None,
+        ],
         on_cancel: Callable[[], None],
     ) -> None:
         self._app = app
@@ -88,6 +104,7 @@ class SetupFlow:
         self.away_team: Optional[Team] = None
         self.home_team: Optional[Team] = None
         self._away_pitcher_id: Optional[str] = None
+        self._away_plan: Optional[LineupPlan] = None
 
     def begin(self) -> None:
         """Start the flow at game-mode selection."""
@@ -198,12 +215,18 @@ class SetupFlow:
         team = self.away_team if is_away else self.home_team
         self._select_pitcher(team, is_away=is_away)
 
-    def _finish(self, home_pitcher_id: Optional[str]) -> None:
+    def _finish(
+        self,
+        home_pitcher_id: Optional[str],
+        home_plan: Optional[LineupPlan] = None,
+    ) -> None:
         self._on_complete(
             self.away_team,
             self.home_team,
             self._away_pitcher_id,
             home_pitcher_id,
+            self._away_plan,
+            home_plan,
             self.config,
         )
 
@@ -213,11 +236,7 @@ class SetupFlow:
 
         def on_pitcher_chosen(chosen_id: Optional[str]) -> None:
             pid = chosen_id or default_pid
-            if is_away:
-                self._away_pitcher_id = pid
-                self._pitcher_phase(is_away=False)
-            else:
-                self._finish(home_pitcher_id=pid)
+            self._edit_lineup(team, pid, is_away)
 
         self._app.push_screen(
             PitcherSelectScreen(
@@ -227,4 +246,37 @@ class SetupFlow:
                 role="Away" if is_away else "Home",
             ),
             on_pitcher_chosen,
+        )
+
+    # --- Lineup review / edit -------------------------------------------
+
+    def _edit_lineup(self, team: Team, pid: str, is_away: bool) -> None:
+        """Build the auto lineup and let a human side review/edit it.
+
+        Builds the auto lineup for ``pid`` (so the editor shows the same
+        starting nine the game would otherwise use), then pushes
+        ``LineupEditScreen``. Its result is an ``Optional[LineupPlan]``: an
+        edited plan on confirm, or None when the auto lineup is accepted
+        (Esc/cancel) — in which case the game screen rebuilds the auto lineup
+        as before. The plan is stored per side and carried through to
+        ``on_complete``; only human sides reach this method.
+        """
+        build_lineup(team, self._repo, pitcher_id=pid)
+
+        def on_lineup_chosen(plan: Optional[LineupPlan]) -> None:
+            if is_away:
+                self._away_pitcher_id = pid
+                self._away_plan = plan
+                self._pitcher_phase(is_away=False)
+            else:
+                self._finish(home_pitcher_id=pid, home_plan=plan)
+
+        self._app.push_screen(
+            LineupEditScreen(
+                team,
+                team.lineup,
+                self._repo,
+                role="Away" if is_away else "Home",
+            ),
+            on_lineup_chosen,
         )
