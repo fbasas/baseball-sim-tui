@@ -20,6 +20,7 @@ from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
 from src.game.lineup_builder import build_lineup
+from src.game.lineup_edit import LineupPlan, apply_plan
 from src.game.narrative import NarrativeContext, generate_inning_summary, generate_play_text, generate_substitution_text, generate_pinch_hitter_text
 from src.game.team import Team
 from src.simulation.engine import AtBatResult
@@ -96,6 +97,8 @@ class GameScreen(Screen):
         home_pitcher_id: Optional[str],
         away_ctx: Optional[TeamManagerContext] = None,
         home_ctx: Optional[TeamManagerContext] = None,
+        away_plan: Optional[LineupPlan] = None,
+        home_plan: Optional[LineupPlan] = None,
         on_game_complete: Optional[Callable[[dict], None]] = None,
         **kwargs,
     ) -> None:
@@ -114,6 +117,10 @@ class GameScreen(Screen):
             home_pitcher_id: Chosen home starting pitcher; None for AI.
             away_ctx: Manager AI context when the AI runs the away dugout.
             home_ctx: Manager AI context when the AI runs the home dugout.
+            away_plan: Human away side's edited lineup (from the pregame
+                LineupEditScreen); None means build the auto lineup. Re-applied
+                on every _build_lineups() call so replay is manual-lineup-safe.
+            home_plan: Human home side's edited lineup; None means auto.
             on_game_complete: Series-mode callback; when set, the end-game
                 menu reports the result upward instead of offering
                 replay/new-matchup.
@@ -127,6 +134,8 @@ class GameScreen(Screen):
         self._home_pitcher_id = home_pitcher_id
         self._away_ctx = away_ctx
         self._home_ctx = home_ctx
+        self._away_plan = away_plan
+        self._home_plan = home_plan
         self._on_game_complete = on_game_complete
         self.engine: Optional[GameEngine] = None
         self.away_hits = 0
@@ -233,6 +242,14 @@ class GameScreen(Screen):
         chosen starter is written back to self._*_pitcher_id so replay and
         stat seeding use it. If the role card can't produce a legal lineup
         for this roster, fall back to the heuristic builder.
+
+        For a human side, if a manually edited ``LineupPlan`` was carried in
+        from the pregame editor, it is re-applied fresh here via
+        ``apply_plan`` (a brand-new validated Lineup from plain data); with no
+        plan the heuristic ``build_lineup`` runs exactly as before. Because the
+        plan is materialized on *every* call, replay (``_reset_game``) restores
+        the manual lineup with any in-game pinch-hitters undone — the plan is
+        never mutated in place.
         """
         self._pregame_notes: List[Tuple[str, str]] = []
         for team, ctx, side in (
@@ -260,9 +277,15 @@ class GameScreen(Screen):
                 else:
                     self._home_pitcher_id = team.lineup.starting_pitcher_id
             else:
-                build_lineup(team, self.repo, pitcher_id=(
-                    self._away_pitcher_id if side == "away" else self._home_pitcher_id
-                ))
+                plan = self._away_plan if side == "away" else self._home_plan
+                if plan is not None:
+                    # Manual lineup: rebuild a fresh Lineup from the plan on
+                    # every call, so replay undoes in-game subs (replay-safe).
+                    apply_plan(team, plan)
+                else:
+                    build_lineup(team, self.repo, pitcher_id=(
+                        self._away_pitcher_id if side == "away" else self._home_pitcher_id
+                    ))
 
     def _log_pregame_decisions(self, log: PlayByPlayLog) -> None:
         """Surface AI pregame choices (starter/lineup) in the play log."""
