@@ -5,6 +5,7 @@ to match official baseball scoring numbers (1-9).
 """
 
 from enum import IntEnum
+from typing import Union
 
 
 class Position(IntEnum):
@@ -90,3 +91,53 @@ class DesignatedHitter:
     """
 
     abbreviation = 'DH'
+
+
+# --- Serialization codec (shared by lineup and substitution serialization) ---
+#
+# Positions serialize to the same abbreviation strings the manager/series layer
+# already uses (see roles.py::POSITION_ABBREVS), with the DesignatedHitter
+# sentinel class encoded as "DH". These strings are the only JSON-safe
+# representation of a Union[Position, DesignatedHitter] value.
+
+_ABBREV_TO_POSITION = {p.abbreviation: p for p in Position}
+
+
+def position_to_abbrev(position: Union[Position, type]) -> str:
+    """Encode a Position enum member or the DesignatedHitter sentinel as a string.
+
+    Args:
+        position: A ``Position`` member or the ``DesignatedHitter`` class itself.
+
+    Returns:
+        The position abbreviation (``'P'``, ``'C'``, ``'1B'``, …, ``'DH'``).
+
+    Raises:
+        TypeError: If ``position`` is neither a ``Position`` nor ``DesignatedHitter``.
+    """
+    if position is DesignatedHitter:
+        return DesignatedHitter.abbreviation
+    if isinstance(position, Position):
+        return position.abbreviation
+    raise TypeError(f"Cannot encode position {position!r}")
+
+
+def abbrev_to_position(abbrev: str) -> Union[Position, type]:
+    """Decode an abbreviation string back to a Position member or DesignatedHitter.
+
+    Args:
+        abbrev: A position abbreviation produced by :func:`position_to_abbrev`.
+
+    Returns:
+        The matching ``Position`` member, or the ``DesignatedHitter`` sentinel
+        class for ``'DH'``.
+
+    Raises:
+        ValueError: If ``abbrev`` is not a known position abbreviation.
+    """
+    if abbrev == DesignatedHitter.abbreviation:
+        return DesignatedHitter
+    try:
+        return _ABBREV_TO_POSITION[abbrev]
+    except KeyError:
+        raise ValueError(f"Unknown position abbreviation {abbrev!r}")

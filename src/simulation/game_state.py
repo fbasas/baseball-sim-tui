@@ -102,6 +102,23 @@ class BaseState:
         """
         return BaseState()
 
+    def to_dict(self) -> dict:
+        """Serialize to a plain JSON-friendly dict.
+
+        Returns:
+            Dict with 'first'/'second'/'third' player IDs (or None).
+        """
+        return {"first": self.first, "second": self.second, "third": self.third}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "BaseState":
+        """Reconstruct a BaseState from :meth:`to_dict` output."""
+        return cls(
+            first=data.get("first"),
+            second=data.get("second"),
+            third=data.get("third"),
+        )
+
     def get_runner_ids(self) -> List[str]:
         """Get list of runner IDs currently on base.
 

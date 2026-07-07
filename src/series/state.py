@@ -23,6 +23,23 @@ class GameRecord:
     def home_won(self) -> bool:
         return self.home_score > self.away_score
 
+    def to_dict(self) -> dict:
+        """Serialize to a plain JSON-friendly dict."""
+        return {
+            "game_number": self.game_number,
+            "away_score": self.away_score,
+            "home_score": self.home_score,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GameRecord":
+        """Reconstruct a GameRecord from :meth:`to_dict` output."""
+        return cls(
+            game_number=data["game_number"],
+            away_score=data["away_score"],
+            home_score=data["home_score"],
+        )
+
 
 @dataclass
 class SeriesState:
@@ -93,3 +110,23 @@ class SeriesState:
     def summary(self) -> Tuple[int, int]:
         """(away_wins, home_wins)."""
         return self.away_wins, self.home_wins
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain JSON-friendly dict.
+
+        Only ``best_of`` and the recorded ``results`` are stored; every other
+        attribute (wins, standings, current game/day) is a derived ``@property``
+        reconstructed automatically on load.
+        """
+        return {
+            "best_of": self.best_of,
+            "results": [record.to_dict() for record in self.results],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SeriesState":
+        """Reconstruct a SeriesState from :meth:`to_dict` output."""
+        return cls(
+            best_of=data["best_of"],
+            results=[GameRecord.from_dict(record) for record in data["results"]],
+        )

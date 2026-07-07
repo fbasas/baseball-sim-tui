@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Union
 
-from src.game.positions import DesignatedHitter, Position
+from src.game.positions import (
+    DesignatedHitter,
+    Position,
+    abbrev_to_position,
+    position_to_abbrev,
+)
 from src.game.state import InningHalf
 
 
@@ -54,6 +59,52 @@ class SubstitutionRecord:
     new_position: Optional[Position]
     batting_order_slot: int  # 0-8
     dh_forfeited: bool = False
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain JSON-friendly dict.
+
+        The ``InningHalf`` and ``SubstitutionType`` enums are encoded by name;
+        positions are encoded as abbreviation strings (``DesignatedHitter`` as
+        ``"DH"``), with ``None`` preserved for pinch hitters/runners.
+        """
+        return {
+            "inning": self.inning,
+            "half": self.half.name,
+            "sub_type": self.sub_type.name,
+            "player_out_id": self.player_out_id,
+            "player_in_id": self.player_in_id,
+            "old_position": (
+                position_to_abbrev(self.old_position)
+                if self.old_position is not None else None
+            ),
+            "new_position": (
+                position_to_abbrev(self.new_position)
+                if self.new_position is not None else None
+            ),
+            "batting_order_slot": self.batting_order_slot,
+            "dh_forfeited": self.dh_forfeited,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SubstitutionRecord":
+        """Reconstruct a SubstitutionRecord from :meth:`to_dict` output."""
+        return cls(
+            inning=data["inning"],
+            half=InningHalf[data["half"]],
+            sub_type=SubstitutionType[data["sub_type"]],
+            player_out_id=data["player_out_id"],
+            player_in_id=data["player_in_id"],
+            old_position=(
+                abbrev_to_position(data["old_position"])
+                if data["old_position"] is not None else None
+            ),
+            new_position=(
+                abbrev_to_position(data["new_position"])
+                if data["new_position"] is not None else None
+            ),
+            batting_order_slot=data["batting_order_slot"],
+            dh_forfeited=data.get("dh_forfeited", False),
+        )
 
 
 class SubstitutionManager:
@@ -238,3 +289,36 @@ class SubstitutionManager:
             return True
 
         return False
+
+    # --- Serialization (for save/load) ---
+
+    def to_dict(self) -> dict:
+        """Serialize the manager's mutable state to a JSON-friendly dict.
+
+        Captures the no-re-entry set, the full substitution history, and both
+        DH-active flags — everything needed to keep MLB substitution invariants
+        intact across a save/reload. ``removed_players`` is sorted for stable,
+        diff-friendly output.
+        """
+        return {
+            "removed_players": sorted(self.removed_players),
+            "substitution_history": [
+                record.to_dict() for record in self.substitution_history
+            ],
+            "away_dh_active": self.away_dh_active,
+            "home_dh_active": self.home_dh_active,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SubstitutionManager":
+        """Reconstruct a SubstitutionManager from :meth:`to_dict` output."""
+        manager = cls(
+            away_uses_dh=data["away_dh_active"],
+            home_uses_dh=data["home_dh_active"],
+        )
+        manager.removed_players = set(data.get("removed_players", []))
+        manager.substitution_history = [
+            SubstitutionRecord.from_dict(record)
+            for record in data.get("substitution_history", [])
+        ]
+        return manager

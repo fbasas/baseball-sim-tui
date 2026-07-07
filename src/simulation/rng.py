@@ -75,6 +75,37 @@ class SimulationRNG:
         """
         return self.history.copy()
 
+    def get_state(self) -> dict:
+        """Capture the underlying generator's internal state for save/resume.
+
+        Returns the numpy ``BitGenerator`` state dict (for PCG64: the ``state``
+        and ``inc`` integers). This — NOT the seed — is what a deterministic
+        mid-game resume must restore: after N draws the seed no longer describes
+        the generator, but the bit-generator state does. The returned dict is a
+        fresh copy of plain JSON-serializable types (numpy builds it on access),
+        so mutating it does not affect the live generator.
+
+        The audit ``history`` trail is intentionally NOT included — it is
+        debug-only and would bloat saves without affecting determinism.
+
+        Returns:
+            A JSON-serializable dict suitable for :meth:`set_state`.
+        """
+        return self.rng.bit_generator.state
+
+    def set_state(self, state: dict) -> None:
+        """Restore a generator state previously returned by :meth:`get_state`.
+
+        After this call the generator resumes producing the exact sequence it
+        would have from the captured point, making mid-game resume deterministic
+        regardless of the original seed.
+
+        Args:
+            state: A bit-generator state dict from :meth:`get_state` (round-trips
+                through JSON unchanged).
+        """
+        self.rng.bit_generator.state = state
+
     def reset(self, seed: Optional[int] = None):
         """Reset RNG state and clear history.
 
