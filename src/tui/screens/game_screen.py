@@ -4,6 +4,7 @@ This module provides the GameScreen that orchestrates the game dashboard,
 loading teams, managing game state, and updating all widgets reactively.
 """
 
+from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
 from textual.app import ComposeResult
@@ -22,7 +23,17 @@ from src.game.substitutions import SubstitutionManager
 from src.game.lineup_builder import build_lineup
 from src.game.lineup_edit import LineupPlan, apply_plan
 from src.game.narrative import NarrativeContext, generate_inning_summary, generate_play_text, generate_substitution_text, generate_pinch_hitter_text
+from src.game.persistence import (
+    BoxScore,
+    GameSnapshot,
+    SaveFile,
+    TeamRef,
+    capture_rng,
+    save_game,
+    saves_dir,
+)
 from src.game.team import Team
+from src.tui.game_config import GameConfig
 from src.simulation.engine import AtBatResult
 from src.simulation.outcomes import AtBatOutcome
 
@@ -62,6 +73,7 @@ class GameScreen(Screen):
         Binding("enter", "advance", "Next Play", show=False),
         Binding("f", "fast_forward", "Fast-Forward"),
         Binding("s", "substitute", "Substitutions"),
+        Binding("ctrl+s", "save_game", "Save"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -76,6 +88,99 @@ class GameScreen(Screen):
     def action_substitute(self) -> None:
         """Open the substitution menu."""
         self.show_substitution_menu()
+
+    def action_save_game(self) -> None:
+        """Save the in-progress game to ``data/saves/`` (Ctrl+S).
+
+        Captures the live game state into a single-game ``SaveFile`` and writes
+        it to a timestamped ``data/saves/*.json`` via ``persistence.save_game``,
+        then flashes a confirmation with ``self.notify``.
+
+        Saving is only reachable at an at-bat boundary: this action is dispatched
+        on the same event loop as ``_advance_one``, which runs to completion
+        before the next event is processed, so no at-bat is ever mid-resolution
+        when the snapshot is captured. A no-op before the game has finished
+        setting up (no engine/teams yet).
+        """
+        if not self.engine or not self.away_team or not self.home_team:
+            return
+        now = datetime.now(timezone.utc)
+        save = self._build_save_file(now.isoformat())
+        filename = f"save-{now.strftime('%Y%m%d-%H%M%S-%f')}.json"
+        save_game(save, saves_dir() / filename)
+        self.notify(f"Saved: {save.label}", title="Game saved")
+
+    def _build_save_file(self, created_at: str) -> SaveFile:
+        """Assemble a single-game ``SaveFile`` from the live screen attributes.
+
+        Pure builder (no I/O): reads ``game_state``, ``sub_manager``, both
+        teams' current ``lineup``/``(team_id, year)``, the simulation RNG state,
+        the ``GameConfig``, and every box-score accumulator, and packs them into
+        the FRE-45 ``SaveFile``/``GameSnapshot`` structure with a human-readable
+        ``label``. The cosmetic narrative streak counters
+        (``_player_hit_counts``, ``_pitcher_consecutive_retired``) are
+        deliberately NOT captured — they reset on resume (spec non-goal).
+
+        Args:
+            created_at: ISO-8601 UTC timestamp to stamp on the save.
+
+        Returns:
+            A ``SaveFile`` whose ``to_dict`` round-trips through
+            ``persistence.load_game``.
+        """
+        config = getattr(self.app, "config", None) or GameConfig()
+        away, home = self.away_team, self.home_team
+        state = self.game_state
+
+        box_score = BoxScore(
+            batting_lines=self._batting_lines,
+            pitching_lines=self._pitching_lines,
+            pitcher_teams=self._pitcher_teams,
+            away_hits=self.away_hits,
+            home_hits=self.home_hits,
+            inning_scores=self._inning_scores,
+            away_errors=self._away_errors,
+            home_errors=self._home_errors,
+            current_inning_away_runs=self._current_inning_away_runs,
+            current_inning_home_runs=self._current_inning_home_runs,
+            current_half_inning=self._current_half_inning,
+        )
+
+        snapshot = GameSnapshot(
+            config=config,
+            away_ref=TeamRef(team_id=away.info.team_id, year=away.info.year),
+            home_ref=TeamRef(team_id=home.info.team_id, year=home.info.year),
+            away_lineup=away.lineup.to_dict(),
+            home_lineup=home.lineup.to_dict(),
+            game_state=state,
+            substitutions=self.sub_manager,
+            box_score=box_score,
+            rng=capture_rng(self.engine.sim.rng),
+        )
+
+        return SaveFile(
+            kind="single",
+            created_at=created_at,
+            label=self._save_label(away, home, state),
+            game=snapshot,
+        )
+
+    @staticmethod
+    def _save_label(away: Team, home: Team, state: GameState) -> str:
+        """Build the human-readable load-list label (matchup + inning + score).
+
+        Example: ``"1927 NYA @ 1927 CHN — T7, 3-2"``. ``T``/``B`` denote the top
+        and bottom of the current inning.
+        """
+        matchup = (
+            f"{away.info.year} {away.info.team_id} @ "
+            f"{home.info.year} {home.info.team_id}"
+        )
+        half_letter = "T" if state.half == InningHalf.TOP else "B"
+        return (
+            f"{matchup} — {half_letter}{state.inning}, "
+            f"{state.away_score}-{state.home_score}"
+        )
 
     def action_quit(self) -> None:
         """Quit the application.
