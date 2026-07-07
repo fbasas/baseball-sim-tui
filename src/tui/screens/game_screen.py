@@ -27,6 +27,7 @@ from src.game.persistence import (
     BoxScore,
     GameSnapshot,
     SaveFile,
+    SeriesSnapshot,
     TeamRef,
     capture_rng,
     restore_rng,
@@ -112,7 +113,7 @@ class GameScreen(Screen):
         self.notify(f"Saved: {save.label}", title="Game saved")
 
     def _build_save_file(self, created_at: str) -> SaveFile:
-        """Assemble a single-game ``SaveFile`` from the live screen attributes.
+        """Assemble a ``SaveFile`` from the live screen (+ series) attributes.
 
         Pure builder (no I/O): reads ``game_state``, ``sub_manager``, both
         teams' current ``lineup``/``(team_id, year)``, the simulation RNG state,
@@ -121,6 +122,12 @@ class GameScreen(Screen):
         ``label``. The cosmetic narrative streak counters
         (``_player_hit_counts``, ``_pitcher_consecutive_retired``) are
         deliberately NOT captured — they reset on resume (spec non-goal).
+
+        In series mode the app-level ``SeriesController`` (``self.app.series`` —
+        standings + both rest ledgers) is captured alongside the current game as
+        a ``SeriesSnapshot`` and ``kind`` is set to ``"series"``; the in-progress
+        game is NOT recorded in the series results (completing it does that), so
+        resume + finish advances the series exactly once.
 
         Args:
             created_at: ISO-8601 UTC timestamp to stamp on the save.
@@ -159,11 +166,19 @@ class GameScreen(Screen):
             rng=capture_rng(self.engine.sim.rng),
         )
 
+        controller = getattr(self.app, "series", None)
+        series = (
+            SeriesSnapshot.from_controller(controller)
+            if controller is not None
+            else None
+        )
+
         return SaveFile(
-            kind="single",
+            kind="series" if series is not None else "single",
             created_at=created_at,
             label=self._save_label(away, home, state),
             game=snapshot,
+            series=series,
         )
 
     @staticmethod
