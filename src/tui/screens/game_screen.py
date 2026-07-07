@@ -722,6 +722,22 @@ class GameScreen(Screen):
                 home[pid] = bf
         return away, home
 
+    def _credit_runs_scored(self, result: AtBatResult) -> None:
+        """Credit one box-score run (R) to each player who scored on the play.
+
+        The scoring player IDs are on ``result.advancement.runners_scored``
+        (in scoring order, batter included when the batter reaches home, e.g.
+        a home run), so ``len(...) == result.runs_scored`` and every run is
+        credited to exactly one batter. ``setdefault`` guards any scorer not
+        pre-seeded by ``_init_stat_lines`` (e.g. a pinch-runner), mirroring the
+        defensive guard used for the batter's own line in ``_log_play``.
+        """
+        for scorer_id in result.advancement.runners_scored:
+            line = self._batting_lines.setdefault(
+                scorer_id, {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
+            )
+            line["R"] += 1
+
     def _log_play(self, result: AtBatResult, team: Team, player_id: str) -> None:
         """Add broadcaster-style narrative to play log.
 
@@ -814,6 +830,12 @@ class GameScreen(Screen):
         if outcome.is_strikeout:
             bl["K"] += 1
         bl["RBI"] += result.runs_scored
+
+        # R (runs scored): credit each player who crossed the plate on this
+        # play — the scorers named in result.advancement.runners_scored, NOT
+        # the current batter and NOT result.runs_scored (that is RBI). On a
+        # home run the batter is already in the list and gets exactly one R.
+        self._credit_runs_scored(result)
 
         # Pitching line
         if pitcher_id not in self._pitching_lines:
