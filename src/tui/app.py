@@ -9,6 +9,7 @@ from textual.widgets import Header
 from src.data.lahman import LahmanRepository
 from src.game.lineup_builder import get_default_starter
 from src.game.lineup_edit import LineupPlan
+from src.game.persistence import SaveError, load_game
 from src.game.team import Team
 from src.series.controller import GameWorkloads, SeriesController
 
@@ -72,7 +73,46 @@ class BaseballSimApp(App):
             self.repo,
             on_complete=self._on_setup_complete,
             on_cancel=self.exit,
+            on_load=self._resume_saved_game,
         ).begin()
+
+    def _resume_saved_game(self, path: Path) -> None:
+        """Load a save from ``path`` and push the restored GameScreen.
+
+        Called from the setup flow's "Load saved game" branch with the file the
+        user picked. Loads the ``SaveFile`` and reconstructs the game via the
+        replay-safe restore path (``GameScreen.restore_from``), then pushes the
+        resumed screen. Any load/restore failure — corrupt/unparseable JSON, a
+        wrong ``schema_version``, or a ``(team_id, year)`` absent from the local
+        Lahman database — is surfaced via ``notify`` and returns to the setup
+        menu rather than crashing (all are ``SaveError`` subclasses).
+
+        Single games only: series resume is a later part, so ``series`` is left
+        ``None`` and no manager-AI contexts are wired here. App-level matchup
+        state is synced from the save so a subsequent Ctrl+S re-save is correct.
+        """
+        try:
+            save = load_game(path)
+            screen = GameScreen.restore_from(save, self.repo)
+        except SaveError as exc:
+            self.notify(
+                str(exc),
+                title="Couldn't load save",
+                severity="error",
+                timeout=10,
+            )
+            self.start_setup()
+            return
+
+        self.config = save.game.config
+        self._away_team = screen.away_team
+        self._home_team = screen.home_team
+        self._away_ctx = None
+        self._home_ctx = None
+        self._away_plan = None
+        self._home_plan = None
+        self.series = None
+        self.push_screen(screen)
 
     def _on_setup_complete(
         self,
