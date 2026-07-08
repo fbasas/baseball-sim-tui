@@ -147,9 +147,8 @@ mutated `Team` objects. All are rebuilt on load from saved primitives +
   `ChoiceScreen`** pushed by `SetupFlow._select_mode` (`setup_flow.py:98`). The
   new-game sequence is `ChoiceScreen`(mode) → `ChoiceScreen`(control) →
   `TeamSelectScreen`×2 → `PitcherSelectScreen`×(human sides) → `GameScreen`.
-- **End-of-game screen is `BoxScoreScreen`** (`r`/`n`/`q`). `EndGameMenu`
-  (`end_game_menu.py`) is **dead code** — do not use it (its removal is tracked
-  by FRE-7).
+- **End-of-game screen is `BoxScoreScreen`** (`r`/`n`/`q`). (`EndGameMenu` was
+  removed in FRE-7.)
 - **`GameScreen` owns the live game** and holds everything a save reads:
   `game_state` (reactive), `engine`, `away_team`/`home_team`, `sub_manager`,
   `_away_ctx`/`_home_ctx`, and all the box-score fields above. App level holds
