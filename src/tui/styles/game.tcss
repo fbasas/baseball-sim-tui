@@ -101,25 +101,6 @@ GameScreen.-narrow {
     scrollbar-size-vertical: 1;
 }
 
-/* End game menu modal */
-EndGameMenu {
-    align: center middle;
-}
-
-#menu {
-    width: 40;
-    height: auto;
-    border: round #d4a843;
-    background: #121f12;
-    color: #f2ecd8;
-    padding: 1 2;
-}
-
-#menu Button {
-    width: 100%;
-    margin: 1 0;
-}
-
 /* Substitution Menu Styles - moved to SubstitutionMenu.DEFAULT_CSS */
 /* ModalScreens don't inherit App CSS_PATH, so styles must be in DEFAULT_CSS */
 
