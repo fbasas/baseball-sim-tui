@@ -125,6 +125,81 @@ class TestRoundTrip:
         json.dumps(make_save().to_dict())
 
 
+# --- Backward compatibility: pre-FRE-90 saves (no 2B/3B/HR keys) -------------
+
+
+class TestPreFre90BoxScore:
+    """A save written before FRE-90 added the ``2B/3B/HR`` batting keys must
+    keep loading, restoring, and accumulating — the missing keys read as 0."""
+
+    def _old_box_dict(self) -> dict:
+        """A serialized BoxScore whose batting lines lack the new keys."""
+        return {
+            "batting_lines": {
+                "b0": {"AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 0, "K": 1},
+            },
+            "pitching_lines": {
+                "sp": {"outs": 18, "H": 5, "R": 2, "ER": 2, "BB": 1, "K": 6},
+            },
+            "pitcher_teams": {"sp": "away"},
+            "away_hits": 8,
+            "home_hits": 6,
+            "inning_scores": [[0, 1], [2, 0]],
+            "away_errors": 1,
+            "home_errors": 0,
+            "current_inning_away_runs": 0,
+            "current_inning_home_runs": 1,
+            "current_half_inning": [7, "BOTTOM"],
+        }
+
+    def test_old_box_score_loads(self):
+        """BoxScore.from_dict accepts pre-FRE-90 batting lines verbatim."""
+        box = BoxScore.from_dict(self._old_box_dict())
+        # Old lines load exactly as stored (no eager key backfill).
+        assert box.batting_lines["b0"] == {
+            "AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 0, "K": 1
+        }
+        assert box.current_half_inning == (7, InningHalf.BOTTOM)
+
+    def test_old_save_file_round_trips(self, tmp_path):
+        """A whole SaveFile carrying pre-FRE-90 box lines loads from disk."""
+        snap = make_snapshot()
+        snap.box_score = BoxScore.from_dict(self._old_box_dict())
+        save = SaveFile(
+            kind="single", created_at="t", label="old", game=snap,
+        )
+        path = save_game(save, tmp_path / "old.json")
+        loaded = load_game(path)
+        assert loaded.game.box_score.batting_lines["b0"]["H"] == 2
+
+    def test_resumed_old_box_keeps_accumulating(self):
+        """Recording into a resumed old box upgrades the touched line in place:
+        the new 2B/3B/HR keys appear as 0 and increment normally, no KeyError."""
+        box = BoxScore.from_dict(self._old_box_dict())
+        result = _double_by("b0")
+        box.record_play(result, batter_id="b0", pitcher_id="sp",
+                        half=InningHalf.TOP)
+        line = box.batting_lines["b0"]
+        assert line["2B"] == 1 and line["3B"] == 0 and line["HR"] == 0
+        assert line["AB"] == 5 and line["H"] == 3  # continued from the old line
+
+
+def _double_by(batter_id: str):
+    """A minimal real AtBatResult for a bases-empty double (no runs)."""
+    from src.simulation.engine import AtBatResult
+    from src.simulation.game_state import AdvancementResult, BaseState
+    from src.simulation.outcomes import AtBatOutcome
+
+    return AtBatResult(
+        outcome=AtBatOutcome.DOUBLE,
+        advancement=AdvancementResult(
+            new_base_state=BaseState(), runs_scored=0, runners_scored=[]
+        ),
+        probabilities={},
+        audit_trail=[],
+    )
+
+
 # --- RNG determinism --------------------------------------------------------
 
 

@@ -266,23 +266,64 @@ class GameScreen(Screen):
         self._on_game_complete = on_game_complete
         self._restore = restore
         self.engine: Optional[GameEngine] = None
-        self.away_hits = 0
-        self.home_hits = 0
-        self._current_half_inning: Tuple[int, InningHalf] = (1, InningHalf.TOP)
         self._fast_forward_timer: Optional[Timer] = None
         self.sub_manager = SubstitutionManager()
         self._player_hit_counts: Dict[str, int] = {}
         self._pitcher_consecutive_retired: int = 0
         self._inning_runs: int = 0
-        # Box score stat tracking
-        self._batting_lines: Dict[str, Dict[str, int]] = {}
-        self._pitching_lines: Dict[str, Dict[str, int]] = {}
-        self._pitcher_teams: Dict[str, str] = {}  # pitcher_id -> "away" or "home"
-        self._inning_scores: List[Tuple[int, int]] = []
-        self._away_errors: int = 0
-        self._home_errors: int = 0
-        self._current_inning_away_runs: int = 0
-        self._current_inning_home_runs: int = 0
+        # Engine-level per-game box score (FRE-90). The loose fields the widgets
+        # and save capture read (away_hits, _batting_lines, …) are read-only
+        # views over this accumulator; the recording logic lives on BoxScore.
+        self._box = BoxScore()
+
+    # --- Box-score views (read-only delegates onto self._box) ---------------
+    # The interactive hot path now accumulates through self._box.record_play /
+    # note_half_inning; these expose its fields under the historical names so
+    # every widget/save read site is unchanged.
+
+    @property
+    def away_hits(self) -> int:
+        return self._box.away_hits
+
+    @property
+    def home_hits(self) -> int:
+        return self._box.home_hits
+
+    @property
+    def _batting_lines(self) -> Dict[str, Dict[str, int]]:
+        return self._box.batting_lines
+
+    @property
+    def _pitching_lines(self) -> Dict[str, Dict[str, int]]:
+        return self._box.pitching_lines
+
+    @property
+    def _pitcher_teams(self) -> Dict[str, str]:
+        return self._box.pitcher_teams
+
+    @property
+    def _inning_scores(self) -> List[Tuple[int, int]]:
+        return self._box.inning_scores
+
+    @property
+    def _away_errors(self) -> int:
+        return self._box.away_errors
+
+    @property
+    def _home_errors(self) -> int:
+        return self._box.home_errors
+
+    @property
+    def _current_inning_away_runs(self) -> int:
+        return self._box.current_inning_away_runs
+
+    @property
+    def _current_inning_home_runs(self) -> int:
+        return self._box.current_inning_home_runs
+
+    @property
+    def _current_half_inning(self) -> Tuple[int, InningHalf]:
+        return self._box.current_half_inning
 
     def compose(self) -> ComposeResult:
         """Compose the three-column game layout.
@@ -487,25 +528,14 @@ class GameScreen(Screen):
         self.game_state = snapshot.game_state
 
     def _restore_box_score(self, box: BoxScore) -> None:
-        """Copy a saved :class:`BoxScore` back onto the loose GameScreen fields.
+        """Install a saved :class:`BoxScore` as the live accumulator.
 
-        The inverse of the capture that FRE-46 will do: rebuilds the linescore /
-        box-score accumulators the widgets render from. The nested per-player
-        line dicts are copied (not just the top level) so live at-bat
-        accumulation (``_log_play`` mutates a line in place) never reaches back
-        into the snapshot's box score.
+        Takes a :meth:`BoxScore.copy` (nested per-player line dicts and lists
+        cloned) so live at-bat accumulation never reaches back into the
+        snapshot's box score. The loose-field views the widgets render from
+        read straight through this accumulator.
         """
-        self._batting_lines = {pid: dict(line) for pid, line in box.batting_lines.items()}
-        self._pitching_lines = {pid: dict(line) for pid, line in box.pitching_lines.items()}
-        self._pitcher_teams = dict(box.pitcher_teams)
-        self.away_hits = box.away_hits
-        self.home_hits = box.home_hits
-        self._inning_scores = list(box.inning_scores)
-        self._away_errors = box.away_errors
-        self._home_errors = box.home_errors
-        self._current_inning_away_runs = box.current_inning_away_runs
-        self._current_inning_home_runs = box.current_inning_home_runs
-        self._current_half_inning = box.current_half_inning
+        self._box = box.copy()
 
     def _build_lineups(self) -> None:
         """Build both lineups: manager AI for its sides, heuristic otherwise.
@@ -566,16 +596,12 @@ class GameScreen(Screen):
             log.add_play(f"[italic #d4a843]{team_name} manager: {reason}[/]")
 
     def _init_stat_lines(self) -> None:
-        """Initialize batting and pitching stat lines for all lineup players."""
-        zero_bat = lambda: {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
-        zero_pitch = lambda: {"outs": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "K": 0}
+        """Seed batting and pitching stat lines for all lineup players.
 
-        for team, label in [(self.away_team, "away"), (self.home_team, "home")]:
-            for slot in team.lineup.slots:
-                self._batting_lines[slot.player_id] = zero_bat()
-            pid = team.lineup.starting_pitcher_id
-            self._pitching_lines[pid] = zero_pitch()
-            self._pitcher_teams[pid] = label
+        Delegates to the engine-level accumulator (FRE-90) so the interactive
+        screen and headless ``play_ai_game`` seed identical lines.
+        """
+        self._box.init_stat_lines(self.away_team, self.home_team)
 
     def _update_lineup_cards(self) -> None:
         """Update lineup card widgets with real team data."""
@@ -822,10 +848,10 @@ class GameScreen(Screen):
 
         # Check for inning change and add divider with inning summary
         current_half = (state.inning, state.half)
-        if current_half != self._current_half_inning:
+        if current_half != self._box.current_half_inning:
             log = self.query_one(PlayByPlayLog)
             # Generate inning summary for the previous half
-            prev_inning, prev_half = self._current_half_inning
+            prev_inning, prev_half = self._box.current_half_inning
             if prev_half == InningHalf.TOP:
                 prev_team_name = self.away_team.info.team_name
             else:
@@ -834,15 +860,11 @@ class GameScreen(Screen):
             log.add_play(f"[italic]{summary}[/italic]")
             self._inning_runs = 0
 
-            # Record inning scores for box score
-            if prev_half == InningHalf.BOTTOM:
-                # End of a full inning — record both halves
-                self._inning_scores.append((self._current_inning_away_runs, self._current_inning_home_runs))
-                self._current_inning_away_runs = 0
-                self._current_inning_home_runs = 0
+            # Linescore/half-inning bookkeeping now lives on the accumulator:
+            # records the completed inning's runs and advances current_half.
+            self._box.note_half_inning(state.inning, state.half)
 
             log.add_inning_divider(state.inning, state.half == InningHalf.TOP)
-            self._current_half_inning = current_half
 
         # Let AI managers act before the at-bat (pitching change for the
         # fielding side, pinch hitter for the batting side). These mutate
@@ -872,14 +894,7 @@ class GameScreen(Screen):
             year=batter_slot.batting_stats.year,
         )
 
-        # Track hits
-        if result.is_hit:
-            if state.half == InningHalf.TOP:
-                self.away_hits += 1
-            else:
-                self.home_hits += 1
-
-        # Log the play
+        # Log the play (also accumulates the box score, incl. team hits).
         self._log_play(result, batting_team, batter_slot.player_id)
 
         # Apply result to state
@@ -1018,24 +1033,13 @@ class GameScreen(Screen):
                 home[pid] = bf
         return away, home
 
-    def _credit_runs_scored(self, result: AtBatResult) -> None:
-        """Credit one box-score run (R) to each player who scored on the play.
-
-        The scoring player IDs are on ``result.advancement.runners_scored``
-        (in scoring order, batter included when the batter reaches home, e.g.
-        a home run), so ``len(...) == result.runs_scored`` and every run is
-        credited to exactly one batter. ``setdefault`` guards any scorer not
-        pre-seeded by ``_init_stat_lines`` (e.g. a pinch-runner), mirroring the
-        defensive guard used for the batter's own line in ``_log_play``.
-        """
-        for scorer_id in result.advancement.runners_scored:
-            line = self._batting_lines.setdefault(
-                scorer_id, {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
-            )
-            line["R"] += 1
-
     def _log_play(self, result: AtBatResult, team: Team, player_id: str) -> None:
-        """Add broadcaster-style narrative to play log.
+        """Add broadcaster-style narrative to the play log and accumulate stats.
+
+        The narrative/streak side stays here; the box-score accumulation (team
+        hits, batting/pitching lines, R crediting, errors, per-inning runs) is
+        delegated to the engine-level accumulator (FRE-90) so the interactive
+        screen and headless ``play_ai_game`` produce identical lines.
 
         Args:
             result: At-bat result with outcome.
@@ -1106,64 +1110,12 @@ class GameScreen(Screen):
         else:
             log.add_play(text)
 
-        # --- Box score stat accumulation ---
-        outcome = result.outcome
-
-        # Batting line
-        if player_id not in self._batting_lines:
-            self._batting_lines[player_id] = {"AB": 0, "R": 0, "H": 0, "RBI": 0, "BB": 0, "K": 0}
-        bl = self._batting_lines[player_id]
-
-        # AB: not counted for BB, HBP, SAC_FLY, SAC_HIT
-        no_ab = {AtBatOutcome.WALK, AtBatOutcome.HIT_BY_PITCH,
-                 AtBatOutcome.SACRIFICE_FLY, AtBatOutcome.SACRIFICE_HIT}
-        if outcome not in no_ab:
-            bl["AB"] += 1
-        if outcome.is_hit:
-            bl["H"] += 1
-        if outcome == AtBatOutcome.WALK:
-            bl["BB"] += 1
-        if outcome.is_strikeout:
-            bl["K"] += 1
-        bl["RBI"] += result.runs_scored
-
-        # R (runs scored): credit each player who crossed the plate on this
-        # play — the scorers named in result.advancement.runners_scored, NOT
-        # the current batter and NOT result.runs_scored (that is RBI). On a
-        # home run the batter is already in the list and gets exactly one R.
-        self._credit_runs_scored(result)
-
-        # Pitching line
-        if pitcher_id not in self._pitching_lines:
-            self._pitching_lines[pitcher_id] = {"outs": 0, "H": 0, "R": 0, "ER": 0, "BB": 0, "K": 0}
-            self._pitcher_teams[pitcher_id] = "home" if state.half == InningHalf.TOP else "away"
-        pl = self._pitching_lines[pitcher_id]
-        if outcome == AtBatOutcome.GIDP:
-            pl["outs"] += 2
-        elif outcome.is_out:
-            pl["outs"] += 1
-        if outcome.is_hit:
-            pl["H"] += 1
-        pl["R"] += result.runs_scored
-        pl["ER"] += result.runs_scored  # Treat all as earned for simplicity
-        if outcome in {AtBatOutcome.WALK, AtBatOutcome.HIT_BY_PITCH}:
-            pl["BB"] += 1
-        if outcome.is_strikeout:
-            pl["K"] += 1
-
-        # Error tracking
-        if outcome == AtBatOutcome.REACHED_ON_ERROR:
-            if state.half == InningHalf.TOP:
-                self._home_errors += 1  # Home team is fielding
-            else:
-                self._away_errors += 1
-
-        # Track inning runs per side
-        if result.runs_scored > 0:
-            if state.half == InningHalf.TOP:
-                self._current_inning_away_runs += result.runs_scored
-            else:
-                self._current_inning_home_runs += result.runs_scored
+        # Box-score accumulation (batting/pitching lines, team hits, R credited
+        # from runners_scored, errors, per-inning runs) — one engine-level seam,
+        # shared with headless play_ai_game. ``pitcher_id`` is the current
+        # pitcher resolved above; ``state.half`` is the half before the result
+        # is applied to game state.
+        self._box.record_play(result, player_id, pitcher_id, state.half)
 
     def _show_game_over(self) -> None:
         """Show full-screen box score at game's end."""
@@ -1171,8 +1123,8 @@ class GameScreen(Screen):
 
         state = self.game_state
 
-        # Finalize last inning scores
-        self._inning_scores.append((self._current_inning_away_runs, self._current_inning_home_runs))
+        # Finalize the in-progress (never-transitioned) inning's linescore.
+        self._box.finalize_inning()
 
         away_name = self.away_team.info.team_name if self.away_team else "Away"
         home_name = self.home_team.info.team_name if self.home_team else "Home"
@@ -1300,20 +1252,10 @@ class GameScreen(Screen):
         and the substitution manager (re-wiring the engine to it). Does not
         touch game_state or lineups — callers handle those.
         """
-        self.away_hits = 0
-        self.home_hits = 0
-        self._current_half_inning = (1, InningHalf.TOP)
+        self._box = BoxScore()
         self._player_hit_counts = {}
         self._pitcher_consecutive_retired = 0
         self._inning_runs = 0
-        self._batting_lines = {}
-        self._pitching_lines = {}
-        self._pitcher_teams = {}
-        self._inning_scores = []
-        self._away_errors = 0
-        self._home_errors = 0
-        self._current_inning_away_runs = 0
-        self._current_inning_home_runs = 0
 
         # Reset substitution state so previously-removed players are again
         # available, and re-wire the engine to the fresh manager.

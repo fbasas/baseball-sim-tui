@@ -16,6 +16,7 @@ from src.game.engine import (
     transition_half_inning,
 )
 from src.game.manager_adapter import TeamManagerContext, ai_pregame, build_view
+from src.game.persistence import BoxScore
 from src.game.positions import Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
@@ -52,6 +53,10 @@ class AutoGameResult:
     away_starter: str = ""
     home_starter: str = ""
     decisions: List[DecisionEvent] = field(default_factory=list)
+    # Per-game box score (batting/pitching lines, linescore) — FRE-90. Filled
+    # via the same engine-level accumulator the interactive screen uses, so
+    # headless games feed season stat aggregation identical lines.
+    box_score: Optional[BoxScore] = None
 
 
 def play_ai_game(
@@ -78,10 +83,14 @@ def play_ai_game(
         home_pitcher_id=home_plan.starting_pitcher,
     )
 
+    box = BoxScore()
+    box.init_stat_lines(away_team, home_team)
+
     result = AutoGameResult(
         away_score=0, home_score=0, innings=0,
         away_starter=away_plan.starting_pitcher,
         home_starter=home_plan.starting_pitcher,
+        box_score=box,
     )
     runs_allowed: Dict[str, int] = {}
 
@@ -93,6 +102,10 @@ def play_ai_game(
     for _ in range(_MAX_PLATE_APPEARANCES):
         if check_game_complete(state):
             break
+
+        # Linescore/half-inning bookkeeping (records a completed inning's runs
+        # as the half turns over), same seam the interactive screen drives.
+        box.note_half_inning(state.inning, state.half)
 
         # --- Manager checks (defense, then offense), same order as the TUI
         fielding_is_away = state.half == InningHalf.BOTTOM
@@ -152,6 +165,11 @@ def play_ai_game(
         )
         runs_allowed[pitcher_id] = runs_allowed.get(pitcher_id, 0) + ab.runs_scored
 
+        # Accumulate the at-bat into the box score (batting/pitching lines, team
+        # hits, R crediting, errors) — state.half is the batting half here,
+        # before the result is applied.
+        box.record_play(ab, batter_slot.player_id, pitcher_id, state.half)
+
         old_outs = state.outs
         new_state = engine._apply_result(state, ab)
         pitcher_outs[pitcher_id] = (
@@ -163,6 +181,9 @@ def play_ai_game(
         state = new_state
     else:
         raise RuntimeError("Game did not complete within the PA cap")
+
+    # Finalize the in-progress (never-transitioned) inning's linescore.
+    box.finalize_inning()
 
     result.away_score = state.away_score
     result.home_score = state.home_score
