@@ -41,8 +41,12 @@ class SaveEntry:
         return self.created_at[:16].replace("T", " ")
 
     def display(self) -> str:
-        """The one-line option text: label, timestamp, and a series marker."""
-        tag = "  [dim](series)[/dim]" if self.kind == "series" else ""
+        """The one-line option text: label, timestamp, and a mode marker."""
+        tag = ""
+        if self.kind == "season":
+            tag = "  [dim](season)[/dim]"
+        elif self.kind == "series":
+            tag = "  [dim](series)[/dim]"
         return f"{self.label}   [dim]{self._short_time()}[/dim]{tag}"
 
 

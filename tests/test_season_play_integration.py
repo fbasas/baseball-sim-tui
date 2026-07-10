@@ -399,11 +399,40 @@ def test_quit_with_unsaved_prompts_then_routes_choice():
     assert events == ["pop", "setup"]
 
 
-def test_save_season_is_warn_only():
+def test_save_season_writes_file_and_notifies(tmp_path, monkeypatch):
+    """Ctrl+S at the hub writes a kind=="season" save (no game) and confirms."""
+    from src.game.persistence import load_game
+    from tests.test_season_persistence import make_season_controller
+
+    monkeypatch.setattr(app_module, "saves_dir", lambda: tmp_path)
+
     notes = []
-    mock = SimpleNamespace(notify=lambda msg, **k: notes.append((msg, k)))
+    controller = make_season_controller()
+    mock = SimpleNamespace(
+        season=controller,
+        notify=lambda msg, **k: notes.append((msg, k)),
+    )
+    mock._season_save_label = lambda: BaseballSimApp._season_save_label(mock)
+    mock._season_team_label = lambda key: BaseballSimApp._season_team_label(mock, key)
+
     BaseballSimApp._save_season(mock)
-    assert notes and notes[0][1].get("severity") == "warning"
+
+    written = list(tmp_path.glob("save-*.json"))
+    assert len(written) == 1
+    loaded = load_game(written[0])
+    assert loaded.kind == "season"
+    assert loaded.season is not None and loaded.game is None
+    # The save baseline advances so the quit prompt stops warning.
+    assert mock._season_saved_count == len(controller.state.results)
+    assert notes and "Saved" in notes[0][0]
+
+
+def test_save_season_noop_without_a_season():
+    """With no live season, saving is a safe no-op (no crash, no file)."""
+    notes = []
+    mock = SimpleNamespace(season=None, notify=lambda msg, **k: notes.append(msg))
+    BaseballSimApp._save_season(mock)
+    assert notes == []
 
 
 # --- Hub wiring: ready + choice routing ------------------------------------

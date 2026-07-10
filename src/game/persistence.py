@@ -34,6 +34,8 @@ from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
 from src.game.team import Lineup, Team
 from src.manager.rest import RestLedger
+from src.season.state import SeasonState
+from src.season.stats import SeasonStats
 from src.series.controller import SeriesController
 from src.series.state import GameRecord, SeriesState
 from src.simulation.outcomes import AtBatOutcome
@@ -41,6 +43,9 @@ from src.simulation.rng import SimulationRNG
 from src.tui.game_config import GameConfig
 
 if TYPE_CHECKING:  # avoid an import cycle; only needed for type hints
+    # SeasonController imports this module (BoxScore), so it is only referenced
+    # for typing here and imported lazily inside to_controller.
+    from src.season.controller import SeasonController
     from src.simulation.engine import AtBatResult
 
 # Bump only with a matching, documented format change. A save whose version does
@@ -556,24 +561,112 @@ class SeriesSnapshot:
         return controller
 
 
+# --- Season snapshot (cross-game state; present for kind == "season") --------
+
+
+@dataclass
+class SeasonSnapshot:
+    """The whole-season cross-game state a season save carries.
+
+    Mirrors :class:`SeriesSnapshot` at season scale: the :class:`SeasonState`
+    (league config, schedule, and the recorded ``results`` from which
+    standings / current day / champion all derive), the :class:`SeasonStats`
+    accumulator, and one :class:`RestLedger` per team key governing pitcher
+    availability across the whole schedule. The loaded ``Team``s and manager
+    contexts live only on the running controller and are re-hydrated from the
+    team keys on load (``src.season.rehydrate.rehydrate_season_teams``), so
+    they are never serialized here.
+
+    :meth:`from_controller` / :meth:`to_controller` bridge to the app-level
+    :class:`~src.season.controller.SeasonController`. As with a series, the
+    in-progress game of a mid-game save is NOT in ``state.results`` — it rides
+    along as the sibling :class:`GameSnapshot` and is recorded into the season
+    only when the resumed game finishes.
+    """
+
+    state: SeasonState
+    stats: SeasonStats
+    ledgers: Dict[str, RestLedger]
+
+    def to_dict(self) -> dict:
+        return {
+            "state": self.state.to_dict(),
+            "stats": self.stats.to_dict(),
+            "ledgers": {
+                key: ledger.to_dict() for key, ledger in self.ledgers.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SeasonSnapshot":
+        return cls(
+            state=SeasonState.from_dict(data["state"]),
+            stats=SeasonStats.from_dict(data["stats"]),
+            ledgers={
+                key: RestLedger.from_dict(led)
+                for key, led in data["ledgers"].items()
+            },
+        )
+
+    @classmethod
+    def from_controller(cls, controller: "SeasonController") -> "SeasonSnapshot":
+        """Capture a live :class:`SeasonController`'s serializable state.
+
+        The loaded teams/contexts are intentionally left out (re-hydrated from
+        keys on load); the in-progress game of a mid-game save is not in
+        ``state.results`` (it is captured separately as the ``GameSnapshot`` and
+        recorded when finished, mirroring :meth:`SeriesSnapshot.from_controller`).
+        """
+        return cls(
+            state=controller.state,
+            stats=controller.stats,
+            ledgers=controller.ledgers,
+        )
+
+    def to_controller(self, teams, contexts) -> "SeasonController":
+        """Rebuild a :class:`SeasonController` around re-hydrated teams/contexts.
+
+        ``teams`` / ``contexts`` are the per-key maps re-hydrated from the saved
+        team keys (see ``src.season.rehydrate.rehydrate_season_teams``); the
+        restored ``state`` (schedule + results ⇒ standings), ``stats``, and
+        ``ledgers`` are installed so a resumed season continues from
+        ``current_day`` with rest availability, standings, and leaderboards
+        intact. Imported lazily because ``SeasonController`` imports this module.
+        """
+        from src.season.controller import SeasonController
+
+        return SeasonController(
+            state=self.state,
+            teams=teams,
+            contexts=contexts,
+            stats=self.stats,
+            ledgers=self.ledgers,
+        )
+
+
 # --- Save file wrapper ------------------------------------------------------
 
 
 @dataclass(eq=False)
 class SaveFile:
-    """Top-level save bundle: metadata + a game snapshot (+ series state).
+    """Top-level save bundle: metadata + an optional game snapshot (+ cross-game).
 
-    ``game`` is always present (both kinds). ``series`` is populated only when
-    ``kind == "series"`` and carries the best-of-N standings + rest ledgers so a
-    mid-series save resumes with cross-game state intact. Equality is over the
+    ``game`` is present for every ``kind ∈ {"single", "series"}`` and for a
+    ``"season"`` save only when it was taken mid-game; a season save between
+    games carries no ``game``. ``series`` is populated only for ``kind ==
+    "series"``, ``season`` only for ``kind == "season"``; each carries the
+    cross-game state (standings + rest ledgers, and for a season the stats too)
+    so a resume continues correctly. The format is additive — ``SCHEMA_VERSION``
+    stays 1 and old single/series saves parse unchanged. Equality is over the
     serialized form.
     """
 
     kind: str
     created_at: str
     label: str
-    game: GameSnapshot
+    game: Optional[GameSnapshot] = None
     series: Optional[SeriesSnapshot] = None
+    season: Optional[SeasonSnapshot] = None
     schema_version: int = SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -582,10 +675,15 @@ class SaveFile:
             "kind": self.kind,
             "created_at": self.created_at,
             "label": self.label,
-            "game": self.game.to_dict(),
         }
+        # ``game`` is omitted for a between-games season save; single/series
+        # saves always carry it, so their on-disk shape is unchanged.
+        if self.game is not None:
+            data["game"] = self.game.to_dict()
         if self.series is not None:
             data["series"] = self.series.to_dict()
+        if self.season is not None:
+            data["season"] = self.season.to_dict()
         return data
 
     @classmethod
@@ -599,23 +697,45 @@ class SaveFile:
             )
         try:
             kind = data["kind"]
+            game_data = data.get("game")
+            game = (
+                GameSnapshot.from_dict(game_data) if game_data is not None else None
+            )
             series = (
                 SeriesSnapshot.from_dict(data["series"])
                 if kind == "series"
                 else None
             )
-            return cls(
+            season = (
+                SeasonSnapshot.from_dict(data["season"])
+                if kind == "season"
+                else None
+            )
+            save = cls(
                 schema_version=version,
                 kind=kind,
                 created_at=data["created_at"],
                 label=data["label"],
-                game=GameSnapshot.from_dict(data["game"]),
+                game=game,
                 series=series,
+                season=season,
             )
         except (KeyError, TypeError) as exc:
             raise CorruptSaveError(
                 f"Save file is missing or has malformed fields: {exc}"
             ) from exc
+        # A single/series save must carry a game; a season save must carry
+        # either its season state or (mid-game) a game — enforced loudly rather
+        # than silently loading a half-empty bundle.
+        if kind in ("single", "series") and game is None:
+            raise CorruptSaveError(
+                f"A {kind!r} save is missing its game snapshot."
+            )
+        if kind == "season" and season is None and game is None:
+            raise CorruptSaveError(
+                "A 'season' save has neither season state nor an in-progress game."
+            )
+        return save
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SaveFile):
