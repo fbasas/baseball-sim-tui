@@ -27,6 +27,7 @@ from src.game.persistence import (
     BoxScore,
     GameSnapshot,
     SaveFile,
+    SeasonSnapshot,
     SeriesSnapshot,
     TeamRef,
     capture_rng,
@@ -127,7 +128,11 @@ class GameScreen(Screen):
         standings + both rest ledgers) is captured alongside the current game as
         a ``SeriesSnapshot`` and ``kind`` is set to ``"series"``; the in-progress
         game is NOT recorded in the series results (completing it does that), so
-        resume + finish advances the series exactly once.
+        resume + finish advances the series exactly once. In season mode the same
+        holds for the app-level ``SeasonController`` (``self.app.season``),
+        captured as a ``SeasonSnapshot`` with ``kind == "season"``: the
+        in-progress game is likewise absent from the season ``results`` and is
+        recorded into the season only when the resumed game finishes.
 
         Args:
             created_at: ISO-8601 UTC timestamp to stamp on the save.
@@ -167,19 +172,31 @@ class GameScreen(Screen):
             rng=capture_rng(self.engine.sim.rng),
         )
 
-        controller = getattr(self.app, "series", None)
-        series = (
-            SeriesSnapshot.from_controller(controller)
-            if controller is not None
-            else None
-        )
+        # A game is played inside exactly one mode. Season mode wins when a
+        # season is live (its ``series`` is always None); otherwise the series
+        # branch is unchanged, and a bare exhibition stays "single".
+        season_controller = getattr(self.app, "season", None)
+        series_controller = getattr(self.app, "series", None)
+        if season_controller is not None:
+            season = SeasonSnapshot.from_controller(season_controller)
+            series = None
+            kind = "season"
+        elif series_controller is not None:
+            season = None
+            series = SeriesSnapshot.from_controller(series_controller)
+            kind = "series"
+        else:
+            season = None
+            series = None
+            kind = "single"
 
         return SaveFile(
-            kind="series" if series is not None else "single",
+            kind=kind,
             created_at=created_at,
             label=self._save_label(away, home, state),
             game=snapshot,
             series=series,
+            season=season,
         )
 
     @staticmethod

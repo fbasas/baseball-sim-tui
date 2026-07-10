@@ -1,16 +1,27 @@
 """Main TUI application for baseball simulation."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
 from textual.app import App, ComposeResult
+from textual.screen import Screen
 from textual.widgets import Header
 
 from src.data.lahman import LahmanRepository
 from src.game.lineup_builder import get_default_starter
 from src.game.lineup_edit import LineupPlan
-from src.game.persistence import SaveError, load_game
+from src.game.persistence import (
+    CorruptSaveError,
+    SaveError,
+    SaveFile,
+    SeasonSnapshot,
+    load_game,
+    save_game,
+    saves_dir,
+)
 from src.game.team import Team
+from src.season.rehydrate import rehydrate_season_teams
 from src.series.controller import GameWorkloads, SeriesController
 
 from .game_config import GameConfig
@@ -35,6 +46,15 @@ _SIM_AHEAD_WEEK_DAYS = 7
 # Toast a sim-ahead progress line no more often than every N simmed games so a
 # long (end-of-season) worker shows life without flooding the notification tray.
 _SIM_AHEAD_PROGRESS_EVERY = 10
+
+
+def _ordinal(n: int) -> str:
+    """``1 -> "1st"``, ``2 -> "2nd"``, ``11 -> "11th"`` — for the save label rank."""
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 class BaseballSimApp(App):
@@ -116,6 +136,9 @@ class BaseballSimApp(App):
         the Part 8 save lands).
         """
         self.season = controller
+        self.series = None
+        # Stamp the mode so a mid-game Ctrl+S save records ``mode == "season"``.
+        self.config = GameConfig(mode="season")
         self._season_saved_count = len(controller.state.results)
         self.push_screen(SeasonHubScreen(controller, self._on_hub_choice))
 
@@ -362,22 +385,65 @@ class BaseballSimApp(App):
     # --- Save / quit --------------------------------------------------------
 
     def _save_season(self) -> None:
-        """Season save is warn-only until Part 8 (FRE-97) lands the snapshot."""
-        self.notify(
-            "Saving a season lands in a follow-up (FRE-97). Your progress this "
-            "session is not yet persistable.",
-            title="Save unavailable",
-            severity="warning",
-            timeout=6,
+        """Save the season's hub state to ``data/saves/`` (no in-progress game).
+
+        Writes a ``kind == "season"`` bundle carrying only the ``SeasonSnapshot``
+        (standings, stats, and every rest ledger) — a hub save is between games,
+        so there is no ``GameSnapshot``. Records the current result count as the
+        new "last saved" baseline so the quit prompt stops warning about lost
+        progress, and flashes a confirmation. A no-op if no season is live.
+        """
+        if self.season is None:
+            return
+        now = datetime.now(timezone.utc)
+        save = SaveFile(
+            kind="season",
+            created_at=now.isoformat(),
+            label=self._season_save_label(),
+            game=None,
+            season=SeasonSnapshot.from_controller(self.season),
+        )
+        filename = f"save-{now.strftime('%Y%m%d-%H%M%S-%f')}.json"
+        save_game(save, saves_dir() / filename)
+        self._season_saved_count = len(self.season.state.results)
+        self.notify(f"Saved: {save.label}", title="Season saved")
+
+    def _season_save_label(self) -> str:
+        """A load-list label like ``"Season Day 12/42 — 1927 NYA 8-3, 1st"``.
+
+        In a watch-only (commissioner) season there is no user team, so the
+        record and rank are dropped: ``"Season Day 12/42 — commissioner"``.
+        """
+        state = self.season.state
+        day = self.season.current_day + 1  # 1-indexed for display
+        total = len(state.schedule)
+        user_key = state.user_team_key
+        if user_key is None:
+            return f"Season Day {day}/{total} — commissioner"
+        wins = losses = rank = 0
+        for i, row in enumerate(state.standings, start=1):
+            if row.key == user_key:
+                wins, losses, rank = row.wins, row.losses, i
+                break
+        name = self._season_team_label(user_key)
+        return (
+            f"Season Day {day}/{total} — {name} {wins}-{losses}, {_ordinal(rank)}"
         )
 
-    def _quit_season_to_menu(self) -> None:
-        """Quit to the mode menu, warning first if unsaved games were played.
+    def _season_team_label(self, key: str) -> str:
+        """``"{year} {team_id}"`` for a team key (e.g. ``"1927 NYA"``)."""
+        for team in self.season.state.teams:
+            if team.key == key:
+                return f"{team.year} {team.team_id}"
+        return key
 
-        Season saving is not available yet (Part 8), so the prompt can only
-        warn: proceeding to the menu discards the games played this session.
-        With no unsaved games (or once the user confirms) control returns to the
-        mode menu via ``start_setup``.
+    def _quit_season_to_menu(self) -> None:
+        """Quit to the mode menu, offering to save first if games are unsaved.
+
+        With no games played since the last save, control returns straight to
+        the mode menu via ``start_setup``. Otherwise the user is prompted to
+        save the season first (Ctrl+S is also always available at the hub), quit
+        without saving, or stay.
         """
         if not self._season_has_unsaved_games():
             self.pop_screen()  # tear down the hub
@@ -385,7 +451,11 @@ class BaseballSimApp(App):
             return
 
         def on_choice(choice: Optional[str]) -> None:
-            if choice == "menu":
+            if choice == "save":
+                self._save_season()
+                self.pop_screen()  # tear down the hub
+                self.start_setup()
+            elif choice == "menu":
                 self.pop_screen()  # tear down the hub
                 self.start_setup()
             # "stay" (or Esc → default) leaves the hub in place.
@@ -393,12 +463,13 @@ class BaseballSimApp(App):
         self.push_screen(
             ChoiceScreen(
                 title="⚾ QUIT SEASON",
-                prompt="Unsaved games this session will be lost — saving isn't available yet.",
+                prompt="You have unsaved games this session.",
                 choices=[
+                    ("save", "Save & quit to menu"),
+                    ("menu", "Quit without saving"),
                     ("stay", "Stay in the season"),
-                    ("menu", "Quit to menu (lose progress)"),
                 ],
-                default_id="stay",
+                default_id="save",
             ),
             on_choice,
         )
@@ -421,7 +492,10 @@ class BaseballSimApp(App):
         """
         try:
             save = load_game(path)
-            if getattr(save, "kind", "single") == "series":
+            kind = getattr(save, "kind", "single")
+            if kind == "season":
+                screen = self._restore_season_game(save)
+            elif kind == "series":
                 screen = self._restore_series_game(save)
             else:
                 screen = GameScreen.restore_from(save, self.repo)
@@ -433,6 +507,7 @@ class BaseballSimApp(App):
                 self._away_plan = None
                 self._home_plan = None
                 self.series = None
+                self.season = None
         except SaveError as exc:
             self.notify(
                 str(exc),
@@ -469,6 +544,7 @@ class BaseballSimApp(App):
 
         self.config = save.game.config
         self.series = controller
+        self.season = None
         self._away_team = screen.away_team
         self._home_team = screen.home_team
         self._away_plan = None
@@ -488,6 +564,87 @@ class BaseballSimApp(App):
             self._home_ctx.day = day
         screen._away_ctx = self._away_ctx
         screen._home_ctx = self._home_ctx
+        return screen
+
+    def _restore_season_game(self, save) -> Screen:
+        """Resume a saved season: rebuild the controller and re-hydrate teams.
+
+        Re-hydrates every league team and its manager context from the saved
+        keys (a missing team raises ``MissingTeamError``; a missing role card is
+        rebuilt in-process, exactly as season setup does), rebuilds the
+        ``SeasonController`` around them with the saved standings / stats /
+        ledgers, and records it as the app's live season. Returns the screen to
+        push: the season hub for a between-games save, or — for a mid-game save
+        — the restored ``GameScreen`` (with a fresh hub pushed underneath so
+        finishing it returns to the hub exactly as an unsaved game does). Any
+        re-hydration failure is a ``SaveError`` the caller surfaces via
+        ``notify``.
+        """
+        snapshot = save.season
+        if snapshot is None:  # from_dict already guards this; belt and braces
+            raise CorruptSaveError("This season save has no season data.")
+        teams, contexts = rehydrate_season_teams(snapshot.state, self.repo)
+        controller = snapshot.to_controller(teams, contexts)
+        self.season = controller
+        self.series = None
+        self.config = GameConfig(mode="season")
+        self._season_saved_count = len(controller.state.results)
+        self._away_ctx = None
+        self._home_ctx = None
+        self._away_plan = None
+        self._home_plan = None
+        if save.game is None:
+            return SeasonHubScreen(controller, self._on_hub_choice)
+        return self._restore_season_midgame(save, controller)
+
+    def _restore_season_midgame(self, save, controller) -> "GameScreen":
+        """Restore an in-progress season game and re-wire it into the season.
+
+        The resumed game is the user's earliest unplayed game
+        (``next_user_game()``) — the same one that was in progress when saved,
+        since a mid-game save never records it in ``results``. The AI opponent's
+        context is synced to its restored rest ledger and the game's day
+        (mirroring ``_play_user_game``), and ``on_game_complete`` is re-wired so
+        finishing the resumed game records it into the season exactly once. A
+        fresh hub is pushed *underneath* the returned game screen so the
+        post-game teardown (``_on_season_game_complete`` → ``_refresh_hub``)
+        lands on the hub exactly as it does for an unsaved game.
+        """
+        game = controller.next_user_game()
+        if game is None:  # a mid-game save always has a user game to resume
+            raise CorruptSaveError(
+                "This mid-game season save has no in-progress user game."
+            )
+        user_key = controller.state.user_team_key
+        away_ctx = (
+            None if game.away_key == user_key else controller.contexts[game.away_key]
+        )
+        home_ctx = (
+            None if game.home_key == user_key else controller.contexts[game.home_key]
+        )
+        if away_ctx is not None:
+            away_ctx.ledger = controller.ledgers[game.away_key]
+            away_ctx.day = game.day
+        if home_ctx is not None:
+            home_ctx.ledger = controller.ledgers[game.home_key]
+            home_ctx.day = game.day
+
+        screen = GameScreen.restore_from(
+            save,
+            self.repo,
+            on_game_complete=lambda payload: self._on_season_game_complete(
+                game, payload
+            ),
+            away_ctx=away_ctx,
+            home_ctx=home_ctx,
+        )
+        self.config = save.game.config
+        self._away_team = screen.away_team
+        self._home_team = screen.home_team
+
+        # Push the hub under the restored game so the finished-game flow tears
+        # down to it (an interactive season game always sits above the hub).
+        self.push_screen(SeasonHubScreen(controller, self._on_hub_choice))
         return screen
 
     def _on_setup_complete(
