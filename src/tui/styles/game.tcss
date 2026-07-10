@@ -104,6 +104,61 @@ GameScreen.-narrow {
 /* Substitution Menu Styles - moved to SubstitutionMenu.DEFAULT_CSS */
 /* ModalScreens don't inherit App CSS_PATH, so styles must be in DEFAULT_CSS */
 
+/* Season hub + league leaders: full screens (they inherit App CSS_PATH),
+   styled like BoxScoreScreen — a centered scrolling document of bordered
+   panels over the night-game background. */
+SeasonHubScreen, LeagueLeadersScreen {
+    layout: vertical;
+    background: #0d160d;
+    color: #f2ecd8;
+    align-horizontal: center;
+}
+
+#hub-container, #leaders-container {
+    width: 100%;
+    max-width: 100;
+    /* 1fr (not auto) bounds the viewport so the keyboard can scroll it. */
+    height: 1fr;
+    padding: 1 2;
+    scrollbar-color: #3e5c40;
+    scrollbar-background: #0d160d;
+    scrollbar-size-vertical: 1;
+}
+
+#hub-container:focus, #leaders-container:focus {
+    /* No focus border — these read as documents, not controls. */
+    border: none;
+}
+
+#hub-day-header, #leaders-title {
+    text-align: center;
+    width: 100%;
+    color: #d4a843;
+    text-style: bold;
+    margin: 1 0 0 0;
+}
+
+#hub-champion {
+    text-align: center;
+    width: 100%;
+    margin: 0 0 1 0;
+}
+
+.hub-header {
+    width: 100%;
+    color: #d4a843;
+    text-style: bold;
+    margin: 1 0 0 0;
+    padding: 0 1;
+}
+
+.hub-section {
+    width: 100%;
+    margin: 0 0 1 0;
+    padding: 0 1;
+    border: round #3e5c40;
+}
+
 /* Footer styling to match baseball theme */
 Footer {
     background: #1a2b1a;
