@@ -158,6 +158,72 @@ class TestEraAppropriateUsage:
             assert 9 <= r.innings <= 25
 
 
+class TestBoxScoreConsistency:
+    """FRE-90: a headless game returns a self-consistent per-game box score."""
+
+    def test_box_score_internally_consistent(self, yankees_1927, cubs_2016):
+        """For a seeded game the box score's identities hold: team hits ==
+        summed batting H; summed batting R per side == that side's final score;
+        summed pitching outs per side == innings*3 (± a last-half partial
+        inning); summed pitching R per side == the opponent's score."""
+        team_a, card_a = yankees_1927
+        team_b, card_b = cubs_2016
+        ctx_a = TeamManagerContext(manager=ManagerAI(card_a), ledger=RestLedger())
+        ctx_b = TeamManagerContext(manager=ManagerAI(card_b), ledger=RestLedger())
+        r = play_ai_game(team_a, team_b, ctx_a, ctx_b, rng_seed=1927)
+
+        box = r.box_score
+        assert box is not None
+
+        # Sides are disjoint player-id sets (a person can't be on both a 1927
+        # and a 2016 roster), so batting/pitching lines split cleanly by side.
+        away_bat = set(team_a.batting_stats)
+        home_bat = set(team_b.batting_stats)
+        away_pit = {p for p, s in box.pitcher_teams.items() if s == "away"}
+        home_pit = {p for p, s in box.pitcher_teams.items() if s == "home"}
+
+        def bat_sum(ids, key):
+            return sum(v[key] for pid, v in box.batting_lines.items() if pid in ids)
+
+        def pitch_sum(ids, key):
+            return sum(box.pitching_lines[pid][key] for pid in ids)
+
+        # Team hits equal summed batting H (per side).
+        assert box.away_hits == bat_sum(away_bat, "H")
+        assert box.home_hits == bat_sum(home_bat, "H")
+
+        # Summed batting R per side equals that side's final score.
+        assert bat_sum(away_bat, "R") == r.away_score
+        assert bat_sum(home_bat, "R") == r.home_score
+
+        # Summed pitching outs per side ≈ innings*3 (the home side may not bat
+        # in the last inning / a walk-off ends one early → allow a partial).
+        expected_outs = r.innings * 3
+        assert abs(pitch_sum(away_pit, "outs") - expected_outs) <= 3
+        assert abs(pitch_sum(home_pit, "outs") - expected_outs) <= 3
+
+        # Summed pitching R per side equals the opponent's score.
+        assert pitch_sum(away_pit, "R") == r.home_score
+        assert pitch_sum(home_pit, "R") == r.away_score
+
+        # Linescore bookkeeping: one column per inning, columns sum to the score.
+        assert len(box.inning_scores) == r.innings
+        assert sum(a for a, _ in box.inning_scores) == r.away_score
+        assert sum(h for _, h in box.inning_scores) == r.home_score
+
+    def test_seeded_game_box_score_reproducible(self, yankees_1927, cubs_2016):
+        """The same seed yields identical batting lines (deterministic box)."""
+        team_a, card_a = yankees_1927
+        team_b, card_b = cubs_2016
+
+        def run():
+            ca = TeamManagerContext(manager=ManagerAI(card_a), ledger=RestLedger())
+            cb = TeamManagerContext(manager=ManagerAI(card_b), ledger=RestLedger())
+            return play_ai_game(team_a, team_b, ca, cb, rng_seed=7).box_score
+
+        assert run().batting_lines == run().batting_lines
+
+
 class TestSeriesRestAcrossGames:
     def test_best_of_series_rotates_starters(self, yankees_1927, cubs_2016):
         """With a shared ledger across days, game 2 gets different starters."""

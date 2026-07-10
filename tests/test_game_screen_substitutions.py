@@ -22,6 +22,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.game.engine import GameEngine
+from src.game.persistence import BoxScore
 from src.game.state import InningHalf
 from src.game.substitutions import SubstitutionManager
 from src.tui.screens.game_screen import GameScreen
@@ -162,22 +163,24 @@ def test_reset_game_restores_starting_pitchers_and_rebuilds_lineup():
             _home_pitcher_id=home_pid,
             engine=SimpleNamespace(sub_manager=None),
             sub_manager=SubstitutionManager(),
-            # Simulate a finished game: bare (pitcherless) state + dirty trackers.
+            # Simulate a finished game: bare (pitcherless) state + a dirty box.
             game_state=GameState(),
-            away_hits=9,
-            home_hits=7,
-            _current_half_inning=(9, InningHalf.BOTTOM),
             _player_hit_counts={"x": 3},
             _pitcher_consecutive_retired=4,
             _inning_runs=2,
-            _batting_lines={"stale": {}},
-            _pitching_lines={"stale": {}},
-            _pitcher_teams={"stale": "away"},
-            _inning_scores=[(1, 0), (0, 2)],
-            _away_errors=2,
-            _home_errors=1,
-            _current_inning_away_runs=1,
-            _current_inning_home_runs=1,
+            _box=BoxScore(
+                batting_lines={"stale": {}},
+                pitching_lines={"stale": {}},
+                pitcher_teams={"stale": "away"},
+                away_hits=9,
+                home_hits=7,
+                inning_scores=[(1, 0), (0, 2)],
+                away_errors=2,
+                home_errors=1,
+                current_inning_away_runs=1,
+                current_inning_home_runs=1,
+                current_half_inning=(9, InningHalf.BOTTOM),
+            ),
             # No manager AI on either side for this regression test.
             _away_ctx=None,
             _home_ctx=None,
@@ -208,8 +211,8 @@ def test_reset_game_restores_starting_pitchers_and_rebuilds_lineup():
         # Lineup rebuilt: the sentinel pinch hitter is gone, leadoff restored.
         assert away.lineup.slots[0].player_id == original_leadoff
         # Per-game trackers cleared, stat lines re-seeded for the new lineup.
-        assert mock_self.away_hits == 0
-        assert mock_self.home_hits == 0
-        assert mock_self._inning_scores == []
-        assert original_leadoff in mock_self._batting_lines
-        assert "stale" not in mock_self._batting_lines
+        assert mock_self._box.away_hits == 0
+        assert mock_self._box.home_hits == 0
+        assert mock_self._box.inning_scores == []
+        assert original_leadoff in mock_self._box.batting_lines
+        assert "stale" not in mock_self._box.batting_lines

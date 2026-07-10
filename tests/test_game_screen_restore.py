@@ -79,19 +79,19 @@ def test_apply_restored_state_injects_engine_state_box_and_rng():
     assert ms.engine.sub_manager is ms.sub_manager
     # Canonical GameState restored verbatim.
     assert ms.game_state == snap.game_state
-    # Loose box-score accumulators restored (by value).
+    # Box-score accumulator restored (by value) as the live self._box.
     box = snap.box_score
-    assert ms._batting_lines == box.batting_lines
-    assert ms._pitching_lines == box.pitching_lines
-    assert ms._pitcher_teams == box.pitcher_teams
-    assert ms.away_hits == box.away_hits
-    assert ms.home_hits == box.home_hits
-    assert ms._inning_scores == box.inning_scores
-    assert ms._away_errors == box.away_errors
-    assert ms._home_errors == box.home_errors
-    assert ms._current_inning_away_runs == box.current_inning_away_runs
-    assert ms._current_inning_home_runs == box.current_inning_home_runs
-    assert ms._current_half_inning == box.current_half_inning
+    assert ms._box.batting_lines == box.batting_lines
+    assert ms._box.pitching_lines == box.pitching_lines
+    assert ms._box.pitcher_teams == box.pitcher_teams
+    assert ms._box.away_hits == box.away_hits
+    assert ms._box.home_hits == box.home_hits
+    assert ms._box.inning_scores == box.inning_scores
+    assert ms._box.away_errors == box.away_errors
+    assert ms._box.home_errors == box.home_errors
+    assert ms._box.current_inning_away_runs == box.current_inning_away_runs
+    assert ms._box.current_inning_home_runs == box.current_inning_home_runs
+    assert ms._box.current_half_inning == box.current_half_inning
     # RNG restored to the exact captured generator state (deterministic resume).
     ref = SimulationRNG()
     restore_rng(ref, snap.rng)
@@ -99,22 +99,23 @@ def test_apply_restored_state_injects_engine_state_box_and_rng():
 
 
 def test_restore_box_score_copies_containers():
-    """_restore_box_score takes fresh list/dict copies so later live-game
+    """_restore_box_score installs a fresh BoxScore.copy so later live-game
     mutation can't reach back into the snapshot's box score."""
     box = make_snapshot().box_score
     ms = SimpleNamespace()
 
     GameScreen._restore_box_score(ms, box)
 
-    assert ms._inning_scores == box.inning_scores
-    assert ms._inning_scores is not box.inning_scores  # fresh copy
-    assert ms._batting_lines == box.batting_lines
-    assert ms._batting_lines is not box.batting_lines
+    assert ms._box is not box  # a distinct accumulator
+    assert ms._box.inning_scores == box.inning_scores
+    assert ms._box.inning_scores is not box.inning_scores  # fresh copy
+    assert ms._box.batting_lines == box.batting_lines
+    assert ms._box.batting_lines is not box.batting_lines
     # Nested per-player line dicts are copied too: mutating the live box score
     # must not reach back into the snapshot.
-    a_player = next(iter(ms._batting_lines))
-    ms._batting_lines[a_player]["H"] += 99
-    assert box.batting_lines[a_player]["H"] != ms._batting_lines[a_player]["H"]
+    a_player = next(iter(ms._box.batting_lines))
+    ms._box.batting_lines[a_player]["H"] += 99
+    assert box.batting_lines[a_player]["H"] != ms._box.batting_lines[a_player]["H"]
 
 
 def test_apply_restored_state_preserves_substitution_invariants():
@@ -180,7 +181,7 @@ def test_finalize_restore_injects_state_without_rebuild_or_reset():
 
     # State was injected from the snapshot.
     assert ms.game_state == snap.game_state
-    assert ms._inning_scores == snap.box_score.inning_scores
+    assert ms._box.inning_scores == snap.box_score.inning_scores
     assert ms.engine.sub_manager is ms.sub_manager
 
 
@@ -196,29 +197,18 @@ def _wire_advance(ms: SimpleNamespace) -> SimpleNamespace:
     ms._show_game_over = lambda: setattr(ms, "_game_over_called", True)
     ms.query_one = lambda *a, **k: _FakeLog()
     ms._fast_forward_timer = None
-    ms._credit_runs_scored = lambda result: GameScreen._credit_runs_scored(ms, result)
     ms._log_play = lambda result, team, pid: GameScreen._log_play(ms, result, team, pid)
     return ms
 
 
 def _fresh_tracking(**overrides):
-    """The full set of loose GameScreen tracking fields at their game-start
-    defaults, for building an advanceable mock self."""
+    """The mock self's game-start tracking state: a fresh box-score accumulator
+    plus the narrative streak counters that live outside it."""
     base = dict(
-        away_hits=0,
-        home_hits=0,
-        _current_half_inning=(1, InningHalf.TOP),
+        _box=BoxScore(),
         _player_hit_counts={},
         _pitcher_consecutive_retired=0,
         _inning_runs=0,
-        _batting_lines={},
-        _pitching_lines={},
-        _pitcher_teams={},
-        _inning_scores=[],
-        _away_errors=0,
-        _home_errors=0,
-        _current_inning_away_runs=0,
-        _current_inning_home_runs=0,
     )
     base.update(overrides)
     return base
@@ -282,19 +272,7 @@ def test_restore_advance_matches_control(tmp_path):
             home_lineup=control.home_team.lineup.to_dict(),
             game_state=control.game_state,
             substitutions=control.sub_manager,
-            box_score=BoxScore(
-                batting_lines=control._batting_lines,
-                pitching_lines=control._pitching_lines,
-                pitcher_teams=control._pitcher_teams,
-                away_hits=control.away_hits,
-                home_hits=control.home_hits,
-                inning_scores=control._inning_scores,
-                away_errors=control._away_errors,
-                home_errors=control._home_errors,
-                current_inning_away_runs=control._current_inning_away_runs,
-                current_inning_home_runs=control._current_inning_home_runs,
-                current_half_inning=control._current_half_inning,
-            ),
+            box_score=control._box.copy(),
             rng=capture_rng(control.engine.sim.rng),
         )
         save = SaveFile(
@@ -327,9 +305,9 @@ def test_restore_advance_matches_control(tmp_path):
         assert restored.game_state.to_dict() == saved_state_dict
         assert restored.away_team.lineup.to_dict() == loaded.game.away_lineup
         assert restored.home_team.lineup.to_dict() == loaded.game.home_lineup
-        assert restored._inning_scores == loaded.game.box_score.inning_scores
-        assert restored.away_hits == loaded.game.box_score.away_hits
-        assert restored._batting_lines == loaded.game.box_score.batting_lines
+        assert restored._box.inning_scores == loaded.game.box_score.inning_scores
+        assert restored._box.away_hits == loaded.game.box_score.away_hits
+        assert restored._box.batting_lines == loaded.game.box_score.batting_lines
 
         # --- Advance both once and demand identical results ----------------
         GameScreen._advance_one(control)   # control's (K+1)th at-bat
@@ -339,10 +317,10 @@ def test_restore_advance_matches_control(tmp_path):
         assert restored.game_state.to_dict() == control.game_state.to_dict()
         # And the box-score accumulation moved identically — the strongest proof
         # the same at-bat was simulated from the same generator state.
-        assert restored._batting_lines == control._batting_lines
-        assert restored._pitching_lines == control._pitching_lines
-        assert restored.away_hits == control.away_hits
-        assert restored.home_hits == control.home_hits
+        assert restored._box.batting_lines == control._box.batting_lines
+        assert restored._box.pitching_lines == control._box.pitching_lines
+        assert restored._box.away_hits == control._box.away_hits
+        assert restored._box.home_hits == control._box.home_hits
 
 
 def test_restore_from_rehydrates_and_arms_restore(tmp_path):
