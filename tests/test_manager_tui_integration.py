@@ -13,6 +13,7 @@ import pytest
 from src.data.models import BattingStats, PitchingStats, TeamSeason
 from src.game.engine import GameEngine
 from src.game.fatigue import FatigueState
+from src.game.persistence import BoxScore
 from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
@@ -382,6 +383,10 @@ class TestSeriesEndGameRouting:
             game_state=state,
             _on_game_complete=on_complete,
             app=app,
+            # The real GameScreen always carries the FRE-90 accumulator; the
+            # completion payload now forwards it (season ingests it, series
+            # ignores it).
+            _box=BoxScore(),
             _pitching_lines={
                 "p1": {"outs": 21, "H": 6, "R": 3, "ER": 3, "BB": 2, "K": 5},
                 "opp": {"outs": 24, "H": 9, "R": 5, "ER": 5, "BB": 1, "K": 3},
@@ -401,6 +406,14 @@ class TestSeriesEndGameRouting:
         assert captured["home_workloads"] == {"p1": 29}
         assert captured["away_workloads"] == {"opp": 34}
         assert not app.exited
+
+    def test_completion_payload_carries_box_score(self):
+        # Season mode (FRE-96) reads the game's stat lines from this key; series
+        # mode ignores it, so its routing above stays behaviorally unchanged.
+        captured = {}
+        mock, app = self._mock_with_result(lambda result: captured.update(result))
+        GameScreen._handle_end_game_choice(mock, "new")
+        assert captured["box_score"] is mock._box
 
     def test_series_mode_quit_exits(self):
         mock, app = self._mock_with_result(lambda result: None)

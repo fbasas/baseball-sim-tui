@@ -1200,6 +1200,9 @@ class GameScreen(Screen):
                 "home_score": state.home_score,
                 "away_workloads": away_workloads,
                 "home_workloads": home_workloads,
+                # Season mode (FRE-96) ingests the game's stat lines from this
+                # accumulator; series mode ignores the extra key, unchanged.
+                "box_score": self._box,
             })
             return
 

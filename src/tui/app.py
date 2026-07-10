@@ -20,6 +20,7 @@ from src.game.manager_adapter import (
     load_manager_for_team,
 )
 from .screens import GameScreen
+from .screens.choice_screen import ChoiceScreen
 from .screens.pitcher_select_screen import PitcherSelectScreen
 from .screens.season_hub_screen import HubChoice, SeasonHubScreen
 from .screens.series_status_screen import SeriesStatusScreen
@@ -28,6 +29,12 @@ from .setup_flow import SetupFlow, pitcher_rows
 
 # Database path relative to this file (src/tui/ -> project root -> data/)
 _DB_PATH = Path(__file__).parent.parent.parent / "data" / "lahman.sqlite"
+
+# Sim-ahead "7 days" spans the current day plus this many following days.
+_SIM_AHEAD_WEEK_DAYS = 7
+# Toast a sim-ahead progress line no more often than every N simmed games so a
+# long (end-of-season) worker shows life without flooding the notification tray.
+_SIM_AHEAD_PROGRESS_EVERY = 10
 
 
 class BaseballSimApp(App):
@@ -58,6 +65,8 @@ class BaseballSimApp(App):
         """Open the repository and start team selection."""
         self.repo = LahmanRepository(str(_DB_PATH))
         self.series: Optional[SeriesController] = None
+        self.season = None  # Optional[SeasonController]; set once a season starts
+        self._season_saved_count = 0  # results count at the last save (warn-only)
         self.config: Optional[GameConfig] = None
         self._away_team: Optional[Team] = None
         self._home_team: Optional[Team] = None
@@ -70,6 +79,7 @@ class BaseballSimApp(App):
     def start_setup(self) -> None:
         """Run the full pregame selection flow, then launch the game."""
         self.series = None
+        self.season = None
         SetupFlow(
             self,
             self.repo,
@@ -98,30 +108,300 @@ class BaseballSimApp(App):
         ).begin()
 
     def _on_season_ready(self, controller) -> None:
-        """Push the season hub for a freshly built ``SeasonController``."""
+        """Push the season hub for a freshly built ``SeasonController``.
+
+        Records the controller as the app's live season and snapshots its
+        result count as the "last saved" baseline (a fresh season starts with
+        zero recorded games, so any game played this session is unsaved until
+        the Part 8 save lands).
+        """
+        self.season = controller
+        self._season_saved_count = len(controller.state.results)
         self.push_screen(SeasonHubScreen(controller, self._on_hub_choice))
 
     def _on_hub_choice(self, choice: str) -> None:
-        """Handle a season hub action.
+        """Dispatch a season hub action to its handler.
 
-        The play/sim/save actions arrive in later season parts (FRE-96/FRE-97);
-        until then they surface a notice behind the same callback seam. The
-        menu-navigation choices work now: a new season or returning to the main
-        menu restarts setup; quit exits the app (mirroring the series
-        scoreboard's ``new`` / exit handling).
+        The play/sim actions run against the live ``SeasonController``; the
+        end-of-season navigation (new season / main menu) restarts setup; quit
+        returns to the mode menu (warning first if unsaved games were played).
         """
-        if choice in (HubChoice.NEW_SEASON, HubChoice.MAIN_MENU):
+        if choice == HubChoice.PLAY:
+            self._play_user_game()
+        elif choice in (HubChoice.SIM_MY_GAME, HubChoice.SIM_DAY):
+            self._sim_current_day()
+        elif choice == HubChoice.SIM_AHEAD:
+            self._prompt_sim_ahead()
+        elif choice == HubChoice.SAVE:
+            self._save_season()
+        elif choice in (HubChoice.NEW_SEASON, HubChoice.MAIN_MENU):
             self.pop_screen()  # tear down the hub
             self.start_setup()
         elif choice == HubChoice.QUIT:
-            self.exit()
-        else:
-            self.notify(
-                "Playing and simming season games lands in a follow-up "
-                "(FRE-96).",
-                title="Coming soon",
-                timeout=6,
+            self._quit_season_to_menu()
+
+    # --- Season hub refresh -------------------------------------------------
+
+    def _refresh_hub(self) -> None:
+        """Replace the (now-stale) top hub with a fresh one over the same season.
+
+        Every play/sim action mutates the controller's state in place; the hub
+        renders from a snapshot taken at ``compose`` time, so it must be rebuilt
+        to reflect new results. Mirrors how the series flow pushes a fresh
+        ``SeriesStatusScreen`` after each game rather than mutating one in
+        place. Called only when the hub is the top screen (after a game screen
+        or a sim-ahead worker has finished), so popping removes exactly it. When
+        the season is now complete the fresh hub composes its summary state
+        automatically.
+        """
+        self.pop_screen()
+        self.push_screen(SeasonHubScreen(self.season, self._on_hub_choice))
+
+    def _season_has_unsaved_games(self) -> bool:
+        """Whether games were recorded since the last save (warn-only for now)."""
+        return len(self.season.state.results) > self._season_saved_count
+
+    # --- Play my game -------------------------------------------------------
+
+    def _play_user_game(self) -> None:
+        """Play the user's next game interactively on a ``GameScreen``.
+
+        Picks a starter for the user's side (the AI opponent picks its own via
+        ``ai_pregame``), syncs the AI side's manager context to its rest ledger
+        and the game's day (exactly as ``_push_game`` does in series mode), and
+        pushes a ``GameScreen`` whose ``on_game_complete`` records the result
+        into the season and sims the rest of the day. A no-op with a notice if
+        there is somehow no user game to play (the action is hidden in that
+        state, but guard anyway).
+        """
+        game = self.season.next_user_game()
+        if game is None:
+            self.notify("No game to play right now.", title="Season")
+            return
+
+        user_key = self.season.state.user_team_key
+        away_team = self.season.teams[game.away_key]
+        home_team = self.season.teams[game.home_key]
+        user_is_home = game.home_key == user_key
+
+        # The user's dugout is human-controlled (ctx=None → they pick + manage);
+        # the opponent runs on its manager context, synced to its ledger + day.
+        away_ctx = None if game.away_key == user_key else self.season.contexts[game.away_key]
+        home_ctx = None if game.home_key == user_key else self.season.contexts[game.home_key]
+        if away_ctx is not None:
+            away_ctx.ledger = self.season.ledgers[game.away_key]
+            away_ctx.day = game.day
+        if home_ctx is not None:
+            home_ctx.ledger = self.season.ledgers[game.home_key]
+            home_ctx.day = game.day
+
+        user_team = home_team if user_is_home else away_team
+        role = "Home" if user_is_home else "Away"
+
+        def after_pick(user_pid: Optional[str]) -> None:
+            away_pid = None if user_is_home else user_pid
+            home_pid = user_pid if user_is_home else None
+            self.push_screen(
+                GameScreen(
+                    self.repo,
+                    away_team,
+                    home_team,
+                    away_pid,
+                    home_pid,
+                    away_ctx=away_ctx,
+                    home_ctx=home_ctx,
+                    on_game_complete=lambda payload: self._on_season_game_complete(
+                        game, payload
+                    ),
+                )
             )
+
+        # ctx=None forces the pitcher-select modal for the user's side.
+        self._pick_series_starter(user_team, None, role, after_pick)
+
+    def _on_season_game_complete(self, scheduled_game, payload: dict) -> None:
+        """Record a finished interactive season game, then sim the rest of the day.
+
+        Records the payload (scores, workloads, and the game's ``BoxScore``)
+        into the controller through the shared bookkeeping path, tears down the
+        finished ``GameScreen``, auto-sims the day's remaining AI games, and
+        rebuilds the hub. A PA-cap failure while simming the rest of the day is
+        surfaced but leaves the user's game (and any AI games already simmed)
+        recorded.
+        """
+        self.season.record_user_game(scheduled_game, payload)
+        self.pop_screen()  # tear down the finished GameScreen → back to the hub
+        self._sim_day_guarded(scheduled_game.day)
+        self._refresh_hub()
+
+    # --- Sim my game / sim this day -----------------------------------------
+
+    def _sim_current_day(self) -> None:
+        """Sim every unplayed game on the current day headlessly, then refresh.
+
+        Backs both **s** (sim my game, then the rest of the day) and **d** (sim
+        this day) — both resolve to "finish the current day headlessly", which
+        includes the user's game when it is still unplayed.
+        """
+        self._sim_day_guarded(self.season.current_day)
+        self._refresh_hub()
+
+    def _sim_day_guarded(self, day: int) -> None:
+        """Sim ``day``'s remaining games, surfacing a PA-cap stop via ``notify``.
+
+        ``SeasonController.sim_day`` records each game as it finishes, so a
+        PA-cap ``RuntimeError`` partway through leaves the earlier games
+        standing; the failed/remaining games stay unplayed and re-simmable.
+        """
+        try:
+            self.season.sim_day(day)
+        except RuntimeError as exc:
+            self._notify_pa_cap(exc)
+
+    def _notify_pa_cap(self, exc: Exception) -> None:
+        """Surface a ``play_ai_game`` plate-appearance-cap failure to the user."""
+        self.notify(
+            f"{exc} — the day was left partly played; the failed game is "
+            "re-simmable.",
+            title="Sim stopped (PA cap)",
+            severity="warning",
+            timeout=10,
+        )
+
+    # --- Sim ahead (worker) -------------------------------------------------
+
+    def _prompt_sim_ahead(self) -> None:
+        """Ask how far to sim, then run the sim-ahead worker for that target."""
+        watch_only = self.season.state.user_team_key is None
+        choices = [
+            ("user", "To my next game"),
+            ("week", f"{_SIM_AHEAD_WEEK_DAYS} days"),
+            ("end", "To end of season"),
+        ]
+        # A watch-only season has no "my next game"; default to the week hop.
+        default_id = "week" if watch_only else "user"
+        self.push_screen(
+            ChoiceScreen(
+                title="⚾ SIM AHEAD",
+                prompt="How far ahead should the league sim?",
+                choices=choices,
+                default_id=default_id,
+            ),
+            self._on_sim_ahead_choice,
+        )
+
+    def _on_sim_ahead_choice(self, mode: Optional[str]) -> None:
+        """Launch the sim-ahead worker for the chosen span (``None`` = no-op)."""
+        if mode is None:
+            return
+        kwargs = self._sim_ahead_kwargs(mode)
+        self.notify("Simming ahead…", title="Sim ahead", timeout=4)
+        self.run_worker(
+            lambda: self._sim_ahead_worker(kwargs),
+            thread=True,
+            exclusive=True,
+            group="season_sim_ahead",
+        )
+
+    def _sim_ahead_kwargs(self, mode: str) -> dict:
+        """Translate a sim-ahead choice id into ``simulate_ahead`` kwargs.
+
+        ``"user"`` stops before the user's next game (or, in a watch-only
+        season, sims to the end); ``"week"`` sims the current day through the
+        next ``_SIM_AHEAD_WEEK_DAYS - 1`` days; ``"end"`` sims the whole season.
+        """
+        if mode == "user":
+            return {"stop_before_user_game": True}
+        if mode == "week":
+            return {"through_day": self.season.current_day + _SIM_AHEAD_WEEK_DAYS - 1}
+        return {}
+
+    def _sim_ahead_worker(self, kwargs: dict) -> None:
+        """Drive ``simulate_ahead`` on a background thread with progress toasts.
+
+        Runs on a Textual worker thread (``play_ai_game`` is CPU-bound); each
+        yielded record advances a counter, and every ``_SIM_AHEAD_PROGRESS_EVERY``
+        games a progress line is posted back on the main thread. A PA-cap
+        ``RuntimeError`` stops the generator with all prior games recorded — it
+        is surfaced and the hub still refreshes. All UI work marshals back via
+        ``call_from_thread``.
+        """
+        count = 0
+        try:
+            for _record in self.season.simulate_ahead(**kwargs):
+                count += 1
+                if count % _SIM_AHEAD_PROGRESS_EVERY == 0:
+                    self.call_from_thread(self._sim_ahead_progress, count)
+        except RuntimeError as exc:
+            self.call_from_thread(self._sim_ahead_stopped, str(exc), count)
+            return
+        self.call_from_thread(self._sim_ahead_finished, count)
+
+    def _sim_ahead_progress(self, count: int) -> None:
+        """Post a running sim-ahead progress toast (from the worker thread)."""
+        self.notify(f"Simmed {count} games…", title="Sim ahead", timeout=3)
+
+    def _sim_ahead_finished(self, count: int) -> None:
+        """Refresh the hub and report how many games the sim-ahead ran."""
+        self._refresh_hub()
+        self.notify(
+            f"Simmed {count} game(s).", title="Sim ahead", timeout=4
+        )
+
+    def _sim_ahead_stopped(self, message: str, count: int) -> None:
+        """Report a PA-cap stop mid-sim-ahead; recorded games stand, hub refreshes."""
+        self._refresh_hub()
+        self.notify(
+            f"Sim stopped after {count} game(s): {message} — the failed game "
+            "is re-simmable.",
+            title="Sim ahead — PA cap",
+            severity="warning",
+            timeout=10,
+        )
+
+    # --- Save / quit --------------------------------------------------------
+
+    def _save_season(self) -> None:
+        """Season save is warn-only until Part 8 (FRE-97) lands the snapshot."""
+        self.notify(
+            "Saving a season lands in a follow-up (FRE-97). Your progress this "
+            "session is not yet persistable.",
+            title="Save unavailable",
+            severity="warning",
+            timeout=6,
+        )
+
+    def _quit_season_to_menu(self) -> None:
+        """Quit to the mode menu, warning first if unsaved games were played.
+
+        Season saving is not available yet (Part 8), so the prompt can only
+        warn: proceeding to the menu discards the games played this session.
+        With no unsaved games (or once the user confirms) control returns to the
+        mode menu via ``start_setup``.
+        """
+        if not self._season_has_unsaved_games():
+            self.pop_screen()  # tear down the hub
+            self.start_setup()
+            return
+
+        def on_choice(choice: Optional[str]) -> None:
+            if choice == "menu":
+                self.pop_screen()  # tear down the hub
+                self.start_setup()
+            # "stay" (or Esc → default) leaves the hub in place.
+
+        self.push_screen(
+            ChoiceScreen(
+                title="⚾ QUIT SEASON",
+                prompt="Unsaved games this session will be lost — saving isn't available yet.",
+                choices=[
+                    ("stay", "Stay in the season"),
+                    ("menu", "Quit to menu (lose progress)"),
+                ],
+                default_id="stay",
+            ),
+            on_choice,
+        )
 
     def _resume_saved_game(self, path: Path) -> None:
         """Load a save from ``path`` and push the restored GameScreen.
