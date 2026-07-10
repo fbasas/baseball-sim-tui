@@ -10,6 +10,7 @@ Screens:
 from .choice_screen import ChoiceScreen
 from .game_screen import GameScreen
 from .save_select_screen import SaveSelectScreen
+from .season_hub_screen import LeagueLeadersScreen, SeasonHubScreen
 from .series_status_screen import SeriesStatusScreen
 from .substitution_menu import SubstitutionMenu
 from .team_select_screen import TeamSelectScreen
@@ -17,7 +18,9 @@ from .team_select_screen import TeamSelectScreen
 __all__ = [
     "ChoiceScreen",
     "GameScreen",
+    "LeagueLeadersScreen",
     "SaveSelectScreen",
+    "SeasonHubScreen",
     "SeriesStatusScreen",
     "SubstitutionMenu",
     "TeamSelectScreen",
