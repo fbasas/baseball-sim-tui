@@ -54,9 +54,22 @@ class HubChoice:
 _RECENT_LIMIT = 6
 # How many rows each leaderboard shows.
 _LEADER_LIMIT = 5
+# Fixed display width of the standings team-name column. Long franchise
+# display names (e.g. "1998 Los Angeles Dodgers") are truncated to fit so
+# every downstream column (W L Pct GB RS RA) stays aligned under its header.
+_TEAM_COL_WIDTH = 24
 
 
 # --- Formatting helpers (pure) ---------------------------------------------
+
+
+def _fit(text: str, width: int) -> str:
+    """Truncate ``text`` to ``width`` display columns (trailing ``…`` if clipped),
+    then left-pad to exactly ``width``. Guarantees a fixed-width cell so the
+    standings columns align under their header regardless of name length."""
+    if len(text) > width:
+        return text[: width - 1] + "…"
+    return text.ljust(width)
 
 
 def _format_pct(pct: float) -> str:
@@ -312,7 +325,7 @@ class SeasonHubScreen(Screen):
         """Standings in order, user's team marked with a caret + bold row."""
         user_key = self._controller.state.user_team_key
         header = (
-            f"   {'Team':<20} {'W':>3} {'L':>3} {'Pct':>5} "
+            f"   {_fit('Team', _TEAM_COL_WIDTH)} {'W':>3} {'L':>3} {'Pct':>5} "
             f"{'GB':>5} {'RS':>4} {'RA':>4}"
         )
         lines = [f"[#6b7d6b]{header}[/]"]
@@ -321,7 +334,7 @@ class SeasonHubScreen(Screen):
             is_user = row.key == user_key
             marker = "►" if is_user else " "
             body = (
-                f" {marker} {self._team_name(row.key):<20} "
+                f" {marker} {_fit(self._team_name(row.key), _TEAM_COL_WIDTH)} "
                 f"{row.wins:>3} {row.losses:>3} {_format_pct(row.pct):>5} "
                 f"{_format_gb(row.games_behind):>5} "
                 f"{row.runs_scored:>4} {row.runs_allowed:>4}"
