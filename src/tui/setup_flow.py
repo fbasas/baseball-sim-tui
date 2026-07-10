@@ -154,6 +154,7 @@ class SetupFlow:
                 prompt="How do you want to play?",
                 choices=_MODE_CHOICES,
                 default_id="single",
+                allow_quit=True,
             ),
             on_mode_chosen,
         )
