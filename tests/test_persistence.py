@@ -51,6 +51,7 @@ def make_box_score() -> BoxScore:
         batting_lines={"b0": {"AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 0, "K": 1}},
         pitching_lines={"away_sp": {"outs": 18, "H": 5, "R": 2, "ER": 2, "BB": 1, "K": 6}},
         pitcher_teams={"away_sp": "away", "home_sp": "home"},
+        batter_teams={"b0": "away"},
         away_hits=8,
         home_hits=6,
         inning_scores=[(0, 1), (2, 0), (1, 1)],

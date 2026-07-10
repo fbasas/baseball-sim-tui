@@ -166,11 +166,21 @@ class BoxScore:
     ``current_half_inning`` a ``(inning, InningHalf)`` tuple; both are encoded
     as JSON lists (the enum by name) and decoded back to tuples so a round-trip
     is type-stable.
+
+    ``batter_teams`` / ``pitcher_teams`` map a player id to its side
+    (``"away"`` / ``"home"``) so a consumer holding only the box (no rosters)
+    can split the lines by team — batting lines are one flat pid->line dict
+    across both dugouts. ``batter_teams`` (FRE-92) mirrors ``pitcher_teams``:
+    it is seeded for every lineup slot and set for anyone who bats or scores
+    (so pinch-hitters and pinch-runners are attributed too), which season stat
+    aggregation relies on. Loading a save written before it existed reads an
+    empty map (see :meth:`from_dict`).
     """
 
     batting_lines: Dict[str, Dict[str, int]] = field(default_factory=dict)
     pitching_lines: Dict[str, Dict[str, int]] = field(default_factory=dict)
     pitcher_teams: Dict[str, str] = field(default_factory=dict)
+    batter_teams: Dict[str, str] = field(default_factory=dict)
     away_hits: int = 0
     home_hits: int = 0
     inning_scores: List[Tuple[int, int]] = field(default_factory=list)
@@ -186,6 +196,7 @@ class BoxScore:
             "batting_lines": self.batting_lines,
             "pitching_lines": self.pitching_lines,
             "pitcher_teams": self.pitcher_teams,
+            "batter_teams": self.batter_teams,
             "away_hits": self.away_hits,
             "home_hits": self.home_hits,
             "inning_scores": [[away, home] for away, home in self.inning_scores],
@@ -203,6 +214,8 @@ class BoxScore:
             batting_lines=data["batting_lines"],
             pitching_lines=data["pitching_lines"],
             pitcher_teams=data["pitcher_teams"],
+            # Tolerate saves written before batter_teams existed (read as {}).
+            batter_teams=data.get("batter_teams", {}),
             away_hits=data["away_hits"],
             home_hits=data["home_hits"],
             inning_scores=[tuple(pair) for pair in data["inning_scores"]],
@@ -240,6 +253,7 @@ class BoxScore:
         for team, label in ((away_team, "away"), (home_team, "home")):
             for slot in team.lineup.slots:
                 self.batting_lines[slot.player_id] = _zero_batting_line()
+                self.batter_teams[slot.player_id] = label
             pid = team.lineup.starting_pitcher_id
             self.pitching_lines[pid] = _zero_pitching_line()
             self.pitcher_teams[pid] = label
@@ -333,6 +347,15 @@ class BoxScore:
         # scorers, NOT the batter and NOT runs_scored (that is RBI).
         self.credit_runs_scored(result)
 
+        # Batter-team attribution (mirrors pitcher_teams). The batter and every
+        # scorer are on the offense, i.e. the batting side, so a pinch-hitter or
+        # a pinch-runner who first appears here is attributed to its team — what
+        # season stat aggregation splits batting lines by.
+        batting_side = "away" if half == InningHalf.TOP else "home"
+        self.batter_teams[batter_id] = batting_side
+        for scorer_id in result.advancement.runners_scored:
+            self.batter_teams[scorer_id] = batting_side
+
         # Pitching line (first-seen reliever is attributed to the fielding side).
         pl = self.pitching_lines.get(pitcher_id)
         if pl is None:
@@ -381,6 +404,7 @@ class BoxScore:
                 pid: dict(line) for pid, line in self.pitching_lines.items()
             },
             pitcher_teams=dict(self.pitcher_teams),
+            batter_teams=dict(self.batter_teams),
             away_hits=self.away_hits,
             home_hits=self.home_hits,
             inning_scores=list(self.inning_scores),

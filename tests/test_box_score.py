@@ -315,6 +315,56 @@ class TestLogPlayAccumulation:
         assert ms._box.home_hits == 0
 
 
+def _make_box_score_dict() -> dict:
+    """A minimal serialized BoxScore (all keys) for from_dict edge cases."""
+    return BoxScore(
+        batting_lines={"b0": _zero_bat(AB=3, H=1)},
+        pitching_lines={"p0": {"outs": 9, "H": 3, "R": 1, "ER": 1, "BB": 1, "K": 4}},
+        pitcher_teams={"p0": "home"},
+        batter_teams={"b0": "away"},
+        current_half_inning=(4, InningHalf.TOP),
+    ).to_dict()
+
+
+class TestBatterTeamAttribution:
+    """FRE-92: ``batter_teams`` mirrors ``pitcher_teams`` so a consumer holding
+    only the box (no rosters) can split the flat batting lines by side.
+    Everyone who bats or scores is attributed to the batting side."""
+
+    def test_record_play_attributes_batter_to_batting_side(self):
+        box = BoxScore()
+        box.record_play(_make_result(AtBatOutcome.SINGLE, []), "away_bat", "P", InningHalf.TOP)
+        box.record_play(_make_result(AtBatOutcome.SINGLE, []), "home_bat", "Q", InningHalf.BOTTOM)
+        assert box.batter_teams == {"away_bat": "away", "home_bat": "home"}
+
+    def test_record_play_attributes_scorers_to_batting_side(self):
+        """A pinch-runner who scores without an at-bat is still attributed."""
+        box = BoxScore()
+        # Batter singles home a runner ("pr1") who never took an at-bat here.
+        box.record_play(_make_result(AtBatOutcome.SINGLE, ["pr1"]), "B", "P", InningHalf.BOTTOM)
+        assert box.batter_teams["B"] == "home"
+        assert box.batter_teams["pr1"] == "home"  # scorer attributed too
+
+    def test_init_stat_lines_seeds_batter_teams(self):
+        def _team(pids, sp):
+            slots = [SimpleNamespace(player_id=pid) for pid in pids]
+            return SimpleNamespace(
+                lineup=SimpleNamespace(slots=slots, starting_pitcher_id=sp)
+            )
+
+        box = BoxScore()
+        box.init_stat_lines(_team(["a1", "a2"], "asp"), _team(["h1", "h2"], "hsp"))
+        assert box.batter_teams == {
+            "a1": "away", "a2": "away", "h1": "home", "h2": "home"
+        }
+
+    def test_from_dict_defaults_batter_teams_for_old_save(self):
+        """A box dict written before batter_teams existed reads an empty map."""
+        data = _make_box_score_dict()
+        del data["batter_teams"]
+        assert BoxScore.from_dict(data).batter_teams == {}
+
+
 class TestBoxScoreImport:
     def test_box_score_screen_importable(self):
         """BoxScoreScreen can be imported."""

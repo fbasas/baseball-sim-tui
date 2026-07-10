@@ -144,6 +144,7 @@ class GameScreen(Screen):
             batting_lines=self._batting_lines,
             pitching_lines=self._pitching_lines,
             pitcher_teams=self._pitcher_teams,
+            batter_teams=self._batter_teams,
             away_hits=self.away_hits,
             home_hits=self.home_hits,
             inning_scores=self._inning_scores,
@@ -300,6 +301,10 @@ class GameScreen(Screen):
     @property
     def _pitcher_teams(self) -> Dict[str, str]:
         return self._box.pitcher_teams
+
+    @property
+    def _batter_teams(self) -> Dict[str, str]:
+        return self._box.batter_teams
 
     @property
     def _inning_scores(self) -> List[Tuple[int, int]]:
