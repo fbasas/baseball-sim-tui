@@ -109,6 +109,7 @@ def _make_mock_self():
         _batting_lines={"away0": {"AB": 4, "R": 1, "H": 2, "RBI": 1, "BB": 0, "K": 1}},
         _pitching_lines={"homep01": {"outs": 19, "H": 8, "R": 3, "ER": 3, "BB": 2, "K": 4}},
         _pitcher_teams={"homep01": "home", "awayp01": "away"},
+        _batter_teams={"away0": "away"},
         _inning_scores=[(1, 0), (0, 1), (2, 0), (0, 1), (0, 0), (0, 0)],
         _away_errors=1,
         _home_errors=0,
@@ -169,6 +170,7 @@ def test_build_save_file_captures_every_box_score_field():
     assert box.batting_lines == mock_self._batting_lines
     assert box.pitching_lines == mock_self._pitching_lines
     assert box.pitcher_teams == mock_self._pitcher_teams
+    assert box.batter_teams == mock_self._batter_teams
     assert box.away_hits == 8
     assert box.home_hits == 5
     assert box.inning_scores == mock_self._inning_scores
