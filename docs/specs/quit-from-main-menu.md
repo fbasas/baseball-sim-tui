@@ -88,13 +88,21 @@ True. Keep the existing markup style (`↑/↓ navigate   Enter select   Esc def
 
 ## Testing
 
-This project has **no CI** — the local pytest suite is the gate — and the Textual
-TUI does **not** render under tmux on the dev host, so **do not** drive this via a
-pty/tmux. Use the repo's established **DB-free, Pilot-free "mock-`self`" idiom**
+This project has **no CI** — the local pytest suite is the gate. Use the repo's
+established **DB-free, Pilot-free "mock-`self`" idiom**
 (see `tests/test_save_select_screen.py` for the `SimpleNamespace`-as-`self` +
 captured-`dismiss` pattern, and `tests/test_season_setup_flow.py` for the `FakeApp`
-that records `push_screen(screen, callback)`). If any in-process `Pilot`
-(`app.run_test()`) test is added it must run in-process only — never under tmux.
+that records `push_screen(screen, callback)`). In-process `Pilot`
+(`app.run_test()`) tests are fine where widget/binding behavior needs a running app.
+
+> **Correction (2026-07-10):** an earlier revision of this spec claimed the Textual
+> TUI "does not render under tmux on the dev host" and banned pty/tmux drives. That
+> was a misdiagnosis: the observed failure was `tmux send-keys` racing bash startup
+> in a fresh detached session (keys sent before the first prompt are discarded, so
+> the app never launched). tmux verification works — create the session, wait for
+> the shell prompt (poll `capture-pane`), then `send-keys`. For control chords use
+> `tmux send-keys -t <pane> C-s` (the tmux MCP `execute-command` types unrecognized
+> key names like `C-s` char-by-char, which the app receives as literal `s`).
 
 Add `tests/test_choice_screen.py` covering the definition of done:
 
