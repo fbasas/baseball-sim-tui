@@ -21,7 +21,9 @@ from src.game.manager_adapter import (
 )
 from .screens import GameScreen
 from .screens.pitcher_select_screen import PitcherSelectScreen
+from .screens.season_hub_screen import HubChoice, SeasonHubScreen
 from .screens.series_status_screen import SeriesStatusScreen
+from .season_setup_flow import SeasonSetupFlow
 from .setup_flow import SetupFlow, pitcher_rows
 
 # Database path relative to this file (src/tui/ -> project root -> data/)
@@ -74,7 +76,52 @@ class BaseballSimApp(App):
             on_complete=self._on_setup_complete,
             on_cancel=self.exit,
             on_load=self._resume_saved_game,
+            on_season=self._start_season_setup,
         ).begin()
+
+    # --- Season flow ------------------------------------------------------
+
+    def _start_season_setup(self) -> None:
+        """Run the season league builder, then push the season hub.
+
+        Picked from the mode menu's "Season" entry. ``SeasonSetupFlow`` owns the
+        league-size / games / team-picker / your-team chain and the in-process
+        role-card pass, then hands back a fully built ``SeasonController``.
+        Backing out of its first step (or a failed role-card pass) returns to
+        the mode menu via ``start_setup``.
+        """
+        SeasonSetupFlow(
+            self,
+            self.repo,
+            on_complete=self._on_season_ready,
+            on_cancel=self.start_setup,
+        ).begin()
+
+    def _on_season_ready(self, controller) -> None:
+        """Push the season hub for a freshly built ``SeasonController``."""
+        self.push_screen(SeasonHubScreen(controller, self._on_hub_choice))
+
+    def _on_hub_choice(self, choice: str) -> None:
+        """Handle a season hub action.
+
+        The play/sim/save actions arrive in later season parts (FRE-96/FRE-97);
+        until then they surface a notice behind the same callback seam. The
+        menu-navigation choices work now: a new season or returning to the main
+        menu restarts setup; quit exits the app (mirroring the series
+        scoreboard's ``new`` / exit handling).
+        """
+        if choice in (HubChoice.NEW_SEASON, HubChoice.MAIN_MENU):
+            self.pop_screen()  # tear down the hub
+            self.start_setup()
+        elif choice == HubChoice.QUIT:
+            self.exit()
+        else:
+            self.notify(
+                "Playing and simming season games lands in a follow-up "
+                "(FRE-96).",
+                title="Coming soon",
+                timeout=6,
+            )
 
     def _resume_saved_game(self, path: Path) -> None:
         """Load a save from ``path`` and push the restored GameScreen.

@@ -36,6 +36,7 @@ _MODE_CHOICES = [
     ("series3", "Best-of-3 series"),
     ("series5", "Best-of-5 series"),
     ("series7", "Best-of-7 series"),
+    ("season", "Season — round-robin league, standings, full stats"),
     ("load", "Load saved game — resume from disk"),
 ]
 
@@ -89,6 +90,10 @@ class SetupFlow:
             ``Path`` when the user picks a game from the "Load saved game"
             flow. The app performs the actual load/restore and pushes the
             resumed ``GameScreen``. Optional — omit to disable resume.
+        on_season: Called with no arguments when the user picks "Season" from
+            the mode list. The season branch diverges from the two-team chain
+            (a league builder loop), so the app hands off to a separate
+            ``SeasonSetupFlow`` here. Optional — omit to disable season mode.
     """
 
     def __init__(
@@ -109,12 +114,14 @@ class SetupFlow:
         ],
         on_cancel: Callable[[], None],
         on_load: Optional[Callable[[Path], None]] = None,
+        on_season: Optional[Callable[[], None]] = None,
     ) -> None:
         self._app = app
         self._repo = repo
         self._on_complete = on_complete
         self._on_cancel = on_cancel
         self._on_load = on_load
+        self._on_season = on_season
         self.config: Optional[GameConfig] = None
         self.away_team: Optional[Team] = None
         self.home_team: Optional[Team] = None
@@ -134,6 +141,9 @@ class SetupFlow:
                 return
             if mode_id == "load":
                 self._select_saved_game()
+                return
+            if mode_id == "season":
+                self._select_season()
                 return
             self._mode_id = mode_id
             self._select_control()
@@ -170,6 +180,20 @@ class SetupFlow:
             self._on_load(path)
 
         self._app.push_screen(SaveSelectScreen(entries), on_selected)
+
+    def _select_season(self) -> None:
+        """Hand off to the separate ``SeasonSetupFlow`` (the league builder).
+
+        Season mode's setup — a league of 4-8 team-seasons on a generated
+        schedule, plus an in-process role-card pass — has nothing in common
+        with the two-team single/series chain, so it lives in its own flow that
+        the app wires via ``on_season``. If no ``on_season`` was supplied, this
+        is a safe no-op back to the menu.
+        """
+        if self._on_season is None:
+            self._select_mode()
+            return
+        self._on_season()
 
     def _select_control(self) -> None:
         def on_control_chosen(control_id: Optional[str]) -> None:
