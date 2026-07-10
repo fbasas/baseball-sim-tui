@@ -15,16 +15,19 @@ Coverage:
 - action dispatch — each binding surfaces the right ``HubChoice`` to the owner.
 """
 
+import re
 from types import SimpleNamespace
 
 from src.season.schedule import ScheduledGame
 from src.season.state import LeagueTeam, SeasonGameRecord, SeasonState
 from src.season.stats import SeasonStats
 from src.tui.screens.season_hub_screen import (
+    _TEAM_COL_WIDTH,
     HubChoice,
     LeagueLeadersScreen,
     SeasonHubScreen,
     _build_leader_table,
+    _fit,
     _format_gb,
     _format_ip,
     _format_pct,
@@ -197,6 +200,71 @@ def test_standings_marks_no_team_when_watch_only():
 
     assert "►" not in table
     assert "[bold]" not in table
+
+
+# --- Long-name alignment + truncation (the FRE-101 bug) --------------------
+
+# Real display names are "{year} {full franchise name}" and routinely exceed
+# the 20-char cell the old renderer used. Include names longer than, equal to,
+# and shorter than _TEAM_COL_WIDTH so both the truncation and padding paths run.
+_LONG_TEAMS = [
+    LeagueTeam("PHI", 1927, "1927 Philadelphia Phillies"),  # 26 > width -> clipped
+    LeagueTeam("LAN", 1998, "1998 Los Angeles Dodgers"),    # 24 == width -> exact
+    LeagueTeam("CIN", 1927, "1927 Reds"),                   # 9 < width -> padded
+    LeagueTeam("NYA", 1927, "1927 Yankees"),                # 12 < width -> padded
+]
+
+
+def _strip_markup(line: str) -> str:
+    """Remove Rich markup tags (``[bold]``, ``[/]``, ``[#hex]``) — franchise
+    names are ASCII with no brackets, so this leaves the visible cells intact."""
+    return re.sub(r"\[/?[^\]]*\]", "", line)
+
+
+def _long_name_state(user_key="PHI-1927"):
+    return SeasonState.create(list(_LONG_TEAMS), 2, user_team_key=user_key)
+
+
+def test_fit_pads_short_and_ellipsizes_long_to_exact_width():
+    assert _fit("Reds", 10) == "Reds      "          # padded
+    assert len(_fit("Reds", 10)) == 10
+    clipped = _fit("Philadelphia Phillies", 10)      # 21 chars -> clipped
+    assert len(clipped) == 10
+    assert clipped == "Philadelp" + "…"              # first 9 chars + ellipsis
+    # A name exactly at the width is untouched (no ellipsis).
+    assert _fit("abcdefghij", 10) == "abcdefghij"
+
+
+def test_standings_columns_align_for_long_names():
+    state = _long_name_state(user_key="PHI-1927")
+    _play_day(state, 0, winner_key="PHI-1927")
+    mock = _hub_mock(_controller(state))
+
+    lines = SeasonHubScreen._build_standings_table(mock).splitlines()
+    stripped = [_strip_markup(l) for l in lines]
+
+    # Every line (header + each row) is the same visible length, and the team
+    # cell occupies exactly _TEAM_COL_WIDTH columns, so the W L Pct GB RS RA
+    # columns start at the same offset on every line.
+    assert len(set(len(s) for s in stripped)) == 1
+    sep = 3 + _TEAM_COL_WIDTH  # 3-char row prefix + fixed team cell
+    for s in stripped:
+        assert s[sep] == " "  # the separator before the numeric columns
+
+
+def test_standings_truncates_overlong_name_with_ellipsis():
+    state = _long_name_state(user_key="PHI-1927")
+    mock = _hub_mock(_controller(state))
+
+    lines = SeasonHubScreen._build_standings_table(mock).splitlines()
+    phi_line = _strip_markup(next(l for l in lines if "Philadelphia" in l))
+
+    # The overlong name is clipped with a trailing ellipsis and the full name
+    # is not shown; the cell is still exactly _TEAM_COL_WIDTH columns.
+    cell = phi_line[3 : 3 + _TEAM_COL_WIDTH]
+    assert cell.endswith("…")
+    assert "Phillies" not in phi_line
+    assert len(cell) == _TEAM_COL_WIDTH
 
 
 # ---------------------------------------------------------------------------
