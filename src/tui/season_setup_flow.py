@@ -255,15 +255,23 @@ class SeasonSetupFlow:
         """Build any missing role cards on a worker, then launch the season.
 
         With every card already present, the season launches immediately (no
-        build attempted, no worker). Otherwise the build runs on a background
-        Textual worker so the UI stays responsive, surfacing per-team progress
-        via ``notify``; on completion the continuation runs back on the main
+        build attempted, no worker). Otherwise every missing team's Lahman
+        inputs are gathered **here on the main thread** — the ``LahmanRepository``
+        wraps a single thread-affine ``sqlite3`` connection, so touching it from
+        the worker would raise ``sqlite3.ProgrammingError`` (not a ``ValueError``,
+        so it would escape the per-team guard and silently kill the worker). Only
+        the pure, CPU-bound ``build_role_card`` + ``save_role_card`` runs on the
+        background Textual worker, so the UI stays responsive; per-team progress
+        is surfaced via ``notify`` and the continuation runs back on the main
         thread (``_finish_role_card_pass``).
         """
         missing = self._missing_role_card_teams()
         if not missing:
             self._launch_season()
             return
+
+        # Read the DB on the owning (main) thread; the worker gets plain data.
+        prepared = [(team, self._gather_role_card_inputs(team)) for team in missing]
 
         self._app.notify(
             f"Building manager role cards for {len(missing)} team(s)…",
@@ -272,7 +280,13 @@ class SeasonSetupFlow:
         )
 
         def work() -> None:
-            failures = self._build_role_cards(missing, progress=self._notify_progress)
+            try:
+                failures = self._build_role_cards(
+                    prepared, progress=self._notify_progress
+                )
+            except Exception as exc:  # noqa: BLE001 - unexpected: surface, never hang
+                self._app.call_from_thread(self._fail_role_card_pass, str(exc))
+                return
             self._app.call_from_thread(self._finish_role_card_pass, failures)
 
         self._app.run_worker(
@@ -287,35 +301,13 @@ class SeasonSetupFlow:
             title="Season setup",
         )
 
-    def _build_role_cards(
-        self,
-        missing: List[LeagueTeam],
-        progress: Optional[Callable[[int, int, LeagueTeam], None]] = None,
-    ) -> List[str]:
-        """Build+save each missing role card; return the names that failed.
+    def _gather_role_card_inputs(self, team: LeagueTeam) -> Tuple:
+        """Read one team-season's Lahman inputs (the ``build_roles`` gather).
 
-        A team whose inference raises ``ValueError`` is skipped and its display
-        name collected — the caller reports the collected names and blocks the
-        season. ``progress`` (if given) is called before each build with
-        ``(index, total, team)``.
-        """
-        failures: List[str] = []
-        total = len(missing)
-        for index, team in enumerate(missing, start=1):
-            if progress is not None:
-                progress(index, total, team)
-            try:
-                self._build_one_role_card(team)
-            except ValueError:
-                failures.append(team.display_name)
-        return failures
-
-    def _build_one_role_card(self, team: LeagueTeam) -> None:
-        """Infer and persist one team-season's role card (the build_roles core).
-
-        Gathers the same Lahman inputs ``scripts/build_roles.py`` does, calls
-        ``build_role_card`` (raises ``ValueError`` when inference can't proceed),
-        and writes the artifact into ``roles_dir``.
+        **Runs on the main thread** — every call here hits the thread-affine
+        ``sqlite3`` connection, so it must never run on the worker. Returns the
+        plain ``(team_season, roster, batting, pitching, appearances)`` tuple the
+        pure build consumes, mirroring ``scripts/build_roles.py``'s gather.
         """
         repo = self._repo
         team_id, year = team.team_id, team.year
@@ -331,6 +323,42 @@ class SeasonSetupFlow:
             if p:
                 pitching[player.player_id] = p
         appearances = repo.get_appearances(team_id, year)
+        return (team_season, roster, batting, pitching, appearances)
+
+    def _build_role_cards(
+        self,
+        prepared: List[Tuple[LeagueTeam, Tuple]],
+        progress: Optional[Callable[[int, int, LeagueTeam], None]] = None,
+    ) -> List[str]:
+        """Build+save each prepared role card; return the names that failed.
+
+        ``prepared`` is a list of ``(team, gathered_inputs)`` produced on the
+        main thread by :meth:`_gather_role_card_inputs`; this method is pure (no
+        DB access) so it is safe to run on the worker. A team whose inference
+        raises ``ValueError`` is skipped and its display name collected — the
+        caller reports the collected names and blocks the season. ``progress``
+        (if given) is called before each build with ``(index, total, team)``.
+        """
+        failures: List[str] = []
+        total = len(prepared)
+        for index, (team, inputs) in enumerate(prepared, start=1):
+            if progress is not None:
+                progress(index, total, team)
+            try:
+                self._build_one_role_card(inputs)
+            except ValueError:
+                failures.append(team.display_name)
+        return failures
+
+    def _build_one_role_card(self, inputs: Tuple) -> None:
+        """Infer and persist one team-season's role card (the build_roles core).
+
+        Pure and DB-free: takes the ``(team_season, roster, batting, pitching,
+        appearances)`` gathered on the main thread, calls ``build_role_card``
+        (raises ``ValueError`` when inference can't proceed), and writes the
+        artifact into ``roles_dir``. Safe to run on the worker thread.
+        """
+        team_season, roster, batting, pitching, appearances = inputs
         card = build_role_card(team_season, roster, batting, pitching, appearances)
         save_role_card(card, self._roles_dir)
 
@@ -353,6 +381,23 @@ class SeasonSetupFlow:
             self._on_cancel()
             return
         self._launch_season()
+
+    def _fail_role_card_pass(self, message: str) -> None:
+        """Report an unexpected worker failure and abort (runs on main thread).
+
+        The per-team ``ValueError`` path (an unbuildable team) is handled by
+        :meth:`_finish_role_card_pass`; this is the safety net for any *other*
+        error escaping the worker (e.g. a save I/O error) so the flow reports it
+        and returns to the mode menu instead of hanging on the progress toast.
+        """
+        self._app.notify(
+            f"Season setup failed while building role cards: {message}. "
+            "Season not started.",
+            title="Season setup failed",
+            severity="error",
+            timeout=12,
+        )
+        self._on_cancel()
 
     # --- Launch -------------------------------------------------------------
 

@@ -21,6 +21,8 @@ Coverage (the DoD):
 routing in ``test_load_resume_flow.py`` style, here for the ``"season"`` id.
 """
 
+import sqlite3
+import threading
 from types import SimpleNamespace
 
 import src.tui.season_setup_flow as season_flow_module
@@ -451,6 +453,147 @@ def test_missing_cards_run_on_a_worker(monkeypatch, tmp_path):
     assert app.worker_kwargs.get("thread") is True
 
 
+class ThreadingApp(FakeApp):
+    """Runs the worker on a *real* background thread (like Textual ``thread=True``).
+
+    Captures any exception that escapes the worker body — mirroring a real
+    worker, which dies silently rather than propagating into the caller — so a
+    test can assert the worker didn't blow up.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.thread_exc = None
+
+    def run_worker(self, work, **kwargs):
+        def runner():
+            try:
+                work()
+            except BaseException as exc:  # noqa: BLE001 - capture like a real worker
+                self.thread_exc = exc
+
+        t = threading.Thread(target=runner)
+        t.start()
+        t.join()
+
+
+class ThreadAffineRepo:
+    """Repo double mimicking SQLite thread affinity.
+
+    The real ``LahmanRepository`` opens one ``sqlite3`` connection with no
+    ``check_same_thread=False``; any query from another thread raises
+    ``sqlite3.ProgrammingError``. This double reproduces exactly that: reads are
+    only legal on the thread that constructed it.
+    """
+
+    def __init__(self):
+        self._owner = threading.get_ident()
+
+    def _guard(self):
+        if threading.get_ident() != self._owner:
+            raise sqlite3.ProgrammingError(
+                "SQLite objects created in a thread can only be used in that "
+                "same thread."
+            )
+
+    def get_available_years(self):
+        return [2016, 1975, 1927, 1906]
+
+    def get_team_season(self, tid, yr):
+        self._guard()
+        return SimpleNamespace(team_id=tid, year=yr)
+
+    def get_team_roster(self, tid, yr):
+        self._guard()
+        return []
+
+    def get_batting_stats(self, pid, yr):
+        self._guard()
+        return None
+
+    def get_pitching_stats(self, pid, yr):
+        self._guard()
+        return None
+
+    def get_appearances(self, tid, yr):
+        self._guard()
+        return []
+
+
+def test_role_card_gather_runs_on_main_thread_not_worker(monkeypatch, tmp_path):
+    """Regression for the thread-affine-SQLite bug.
+
+    The DB gather must run on the main thread and only the pure build on the
+    worker. With a thread-affine repo (raising ``ProgrammingError`` off its
+    creating thread, exactly like the real connection), the old code — which
+    read the DB inside the worker — would have raised, escaped the
+    ``except ValueError`` guard, killed the worker, and never started the
+    season. Here the season must still start, and the build must have genuinely
+    run on the background thread.
+    """
+    main_id = threading.get_ident()
+    _install_team_loader(monkeypatch)
+    for team_id, year in _FOUR_TEAMS[:-1]:
+        _write_card(tmp_path, team_id, year)  # DDD-1906 missing -> must build
+
+    build_threads = []
+
+    def fake_build(*a, **k):
+        build_threads.append(threading.get_ident())
+        return TeamRoleCard("DDD", 1906, {}, {}, [], {})
+
+    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
+
+    repo = ThreadAffineRepo()  # owner == main/test thread
+    app, captured = ThreadingApp(), {}
+    flow = _make_flow(app, repo, tmp_path, captured)
+    _drive_to_user_team(app, flow)
+    app.last_callback("AAA-1927")
+
+    assert app.thread_exc is None  # gather ran on main thread; worker survived
+    assert captured.get("controller") is not None  # season started
+    assert "cancel" not in captured
+    assert (tmp_path / "DDD-1906.json").exists()
+    # The build itself genuinely ran off the main thread.
+    assert build_threads and all(tid != main_id for tid in build_threads)
+
+
+def test_worker_surfaces_unexpected_failure_and_aborts(monkeypatch, tmp_path):
+    """A non-``ValueError`` escaping the worker is surfaced, not swallowed.
+
+    ``ValueError`` means "unbuildable team" (named, blocks start); any other
+    error (e.g. a save I/O failure) must still report and return to the mode
+    menu via ``on_cancel`` rather than hanging on the progress toast.
+    """
+    _install_team_loader(monkeypatch)
+    for team_id, year in _FOUR_TEAMS[:-1]:
+        _write_card(tmp_path, team_id, year)
+
+    def fake_build(*a, **k):
+        raise RuntimeError("disk gremlins")
+
+    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
+
+    repo = SimpleNamespace(
+        get_available_years=lambda: [2016, 1975, 1927, 1906],
+        get_team_season=lambda tid, yr: SimpleNamespace(team_id=tid, year=yr),
+        get_team_roster=lambda tid, yr: [],
+        get_batting_stats=lambda pid, yr: None,
+        get_pitching_stats=lambda pid, yr: None,
+        get_appearances=lambda tid, yr: [],
+    )
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, repo, tmp_path, captured)
+    _drive_to_user_team(app, flow)
+    app.last_callback("AAA-1927")
+
+    assert "controller" not in captured
+    assert captured.get("cancel") is True
+    error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
+    assert error_notes
+    assert "disk gremlins" in error_notes[-1]
+
+
 def test_all_cards_present_uses_no_worker(monkeypatch, tmp_path):
     _install_team_loader(monkeypatch)
     for team_id, year in _FOUR_TEAMS:
@@ -496,9 +639,11 @@ def test_build_role_cards_collects_failures(monkeypatch, tmp_path):
         FakeApp(), repo, on_complete=lambda c: None, on_cancel=lambda: None,
         roles_dir=tmp_path,
     )
+    # Inputs are gathered on the main thread (here), then built (pure) below.
+    prepared = [(team, flow._gather_role_card_inputs(team)) for team in teams]
     progress = []
     failures = flow._build_role_cards(
-        teams, progress=lambda i, n, t: progress.append((i, n, t.key))
+        prepared, progress=lambda i, n, t: progress.append((i, n, t.key))
     )
     assert failures == ["1927 AAA", "1975 BBB"]
     assert progress == [(1, 2, "AAA-1927"), (2, 2, "BBB-1975")]
