@@ -62,7 +62,11 @@ def _make_setup_flow(app):
 
 def test_action_quit_dismisses_none():
     captured = []
-    mock = SimpleNamespace(dismiss=lambda result=None: captured.append(result))
+    # GAME MODE shape: quit_exits_app off -> action_quit routes through dismiss.
+    mock = SimpleNamespace(
+        _quit_exits_app=False,
+        dismiss=lambda result=None: captured.append(result),
+    )
 
     ChoiceScreen.action_quit(mock)
 
@@ -75,21 +79,23 @@ def test_action_quit_dismisses_none():
 
 
 def test_check_action_quit_enabled_when_allow_quit():
-    mock = SimpleNamespace(_allow_quit=True)
-    assert ChoiceScreen.check_action(mock, "quit", ()) is True
+    # Real instance so the _quit_enabled property (allow_quit OR quit_exits_app)
+    # is exercised rather than a stubbed attribute.
+    screen = ChoiceScreen("T", "P", _CHOICES, allow_quit=True)
+    assert screen.check_action("quit", ()) is True
 
 
 def test_check_action_quit_hidden_when_not_allow_quit():
-    mock = SimpleNamespace(_allow_quit=False)
+    screen = ChoiceScreen("T", "P", _CHOICES)
     # None both disables and hides the binding (Textual convention).
-    assert ChoiceScreen.check_action(mock, "quit", ()) is None
+    assert screen.check_action("quit", ()) is None
 
 
 def test_check_action_non_quit_always_enabled():
-    for allow_quit in (True, False):
-        mock = SimpleNamespace(_allow_quit=allow_quit)
-        assert ChoiceScreen.check_action(mock, "confirm", ()) is True
-        assert ChoiceScreen.check_action(mock, "use_default", ()) is True
+    for kwargs in ({"allow_quit": True}, {}):
+        screen = ChoiceScreen("T", "P", _CHOICES, **kwargs)
+        assert screen.check_action("confirm", ()) is True
+        assert screen.check_action("use_default", ()) is True
 
 
 # ---------------------------------------------------------------------------

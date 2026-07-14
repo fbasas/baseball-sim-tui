@@ -26,6 +26,11 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         allow_quit: When True, enable the ``q`` key to dismiss ``None`` (so the
             flow's ``on_cancel`` can exit the app) and advertise it in the hint.
             Off by default so only the main (game-mode) menu opts in.
+        quit_exits_app: When True, enable/advertise ``q`` just like ``allow_quit``
+            but have ``action_quit`` call ``self.app.exit()`` **directly** rather
+            than routing through ``dismiss(None)``. Used by MANAGER CONTROL, whose
+            ``dismiss(None)`` would return to the mode menu instead of quitting.
+            Independent of ``allow_quit``; off by default.
     """
 
     CSS = """
@@ -89,6 +94,7 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         choices: List[Tuple[str, str]],
         default_id: Optional[str] = None,
         allow_quit: bool = False,
+        quit_exits_app: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -97,26 +103,32 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         self._choices = choices
         self._default_id = default_id or (choices[0][0] if choices else None)
         self._allow_quit = allow_quit
+        self._quit_exits_app = quit_exits_app
+
+    @property
+    def _quit_enabled(self) -> bool:
+        """``q`` is active (and advertised) under either opt-in."""
+        return self._allow_quit or self._quit_exits_app
 
     def check_action(self, action: str, parameters: tuple) -> Optional[bool]:
         """Gate the opt-in ``q`` quit key; leave every other action enabled.
 
         Returning ``None`` for ``quit`` when this instance didn't opt in both
         disables the key and hides it (Textual convention), so a ``ChoiceScreen``
-        constructed without ``allow_quit=True`` is entirely unaffected.
+        constructed with neither opt-in is entirely unaffected.
         """
         if action == "quit":
-            return True if self._allow_quit else None
+            return True if self._quit_enabled else None
         return True
 
     @property
     def _hint_text(self) -> str:
         """The static key-hint line; adds the quit affordance only when opted in.
 
-        Built from ``self._allow_quit`` and read by ``compose``. Exposed as a
+        Built from ``self._quit_enabled`` and read by ``compose``. Exposed as a
         property so the hint can be asserted without standing up an app.
         """
-        return self._HINT + self._QUIT_HINT if self._allow_quit else self._HINT
+        return self._HINT + self._QUIT_HINT if self._quit_enabled else self._HINT
 
     def compose(self) -> ComposeResult:
         with Container(id="choice-container"):
@@ -153,10 +165,20 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         self.dismiss(self._default_id)
 
     def action_quit(self) -> None:
-        """Quit the app via the flow's cancel path (opt-in; gated by ``check_action``).
+        """Quit the app (opt-in; gated by ``check_action``).
 
-        Dismissing ``None`` flows into the mode menu's ``on_mode_chosen(None)`` →
-        ``on_cancel`` → the app's ``exit``. Routing through ``dismiss`` keeps this
-        screen generic rather than calling ``self.app.exit()`` directly.
+        Two shapes, selected by which opt-in was passed:
+
+        - ``quit_exits_app=True`` (MANAGER CONTROL): call ``self.app.exit()``
+          directly. Here ``dismiss(None)`` would route to ``on_control_chosen(None)``
+          → back to the mode menu, not quit — so we bypass it, matching the
+          ``GameScreen`` idiom (``q`` = exit app).
+        - otherwise (GAME MODE, ``allow_quit=True``): ``dismiss(None)`` flows into
+          the mode menu's ``on_mode_chosen(None)`` → ``on_cancel`` → the app's
+          ``exit``. Routing through ``dismiss`` keeps this path byte-for-byte as
+          it was before ``quit_exits_app`` existed.
         """
-        self.dismiss(None)
+        if self._quit_exits_app:
+            self.app.exit()
+        else:
+            self.dismiss(None)
