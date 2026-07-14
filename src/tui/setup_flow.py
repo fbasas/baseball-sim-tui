@@ -217,6 +217,7 @@ class SetupFlow:
                 prompt="Who manages the dugouts?",
                 choices=_CONTROL_CHOICES,
                 default_id="home_ai",
+                quit_exits_app=True,
             ),
             on_control_chosen,
         )

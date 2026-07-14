@@ -88,7 +88,7 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
 
     _HINT = (
         "[#d4a843]↑/↓[/] navigate   [#d4a843]Enter[/] select   "
-        "[#d4a843]Esc[/] use default [#d4a843]★[/]"
+        "[#d4a843]Esc[/] use default [#d4a843]★[/]   [#d4a843]q[/] quit"
     )
 
     BINDINGS = [
@@ -96,6 +96,7 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
         # OptionList's own Enter binding.
         Binding("enter", "confirm", "Select", priority=True),
         Binding("escape", "use_default", "Use Default"),
+        Binding("q", "quit", "Quit"),
     ]
 
     def __init__(
@@ -178,3 +179,7 @@ class PitcherSelectScreen(ModalScreen[Optional[str]]):
 
     def action_use_default(self) -> None:
         self.dismiss(self._default_pitcher_id)
+
+    def action_quit(self) -> None:
+        """Quit the app from this locked-in pregame setup screen."""
+        self.app.exit()

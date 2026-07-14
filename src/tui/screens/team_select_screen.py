@@ -87,7 +87,10 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
     }
     """
 
-    _HINT = "[#d4a843]↑/↓[/] navigate   [#d4a843]Enter[/] select   [#d4a843]Esc[/] back"
+    _HINT = (
+        "[#d4a843]↑/↓[/] navigate   [#d4a843]Enter[/] select   "
+        "[#d4a843]Esc[/] back   [#d4a843]q[/] quit"
+    )
 
     BINDINGS = [
         # priority so they fire (and show in the footer) at the screen level
@@ -96,6 +99,7 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
         Binding("down", "cursor_down", "Down", priority=True),
         Binding("enter", "confirm", "Select", priority=True),
         Binding("escape", "back", "Back"),
+        Binding("q", "quit", "Quit"),
     ]
 
     def __init__(
@@ -227,6 +231,10 @@ class TeamSelectScreen(ModalScreen[Optional[Tuple[str, int]]]):
             self._enter_decade_phase()
         else:
             self.dismiss(None)
+
+    def action_quit(self) -> None:
+        """Quit the app from this locked-in pregame setup screen."""
+        self.app.exit()
 
     # --- Selection routing ----------------------------------------------
 

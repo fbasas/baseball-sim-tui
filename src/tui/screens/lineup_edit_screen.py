@@ -176,7 +176,8 @@ class LineupEditScreen(ModalScreen[Optional[LineupPlan]]):
     _HINT = (
         "[#d4a843]↑/↓[/] select   [#d4a843],/.[/] reorder   "
         "[#d4a843]p[/] swap pos   [#d4a843]s[/] sub\n"
-        "[#d4a843]r[/] reset   [#d4a843]Enter[/] confirm   [#d4a843]Esc[/] cancel"
+        "[#d4a843]r[/] reset   [#d4a843]Enter[/] confirm   "
+        "[#d4a843]Esc[/] cancel   [#d4a843]q[/] quit"
     )
 
     _BENCH_HINT = (
@@ -198,6 +199,7 @@ class LineupEditScreen(ModalScreen[Optional[LineupPlan]]):
         # focused child; when the bench list is open we route it to the sub pick.
         Binding("enter", "confirm", "Confirm", priority=True),
         Binding("escape", "cancel", "Cancel"),
+        Binding("q", "quit", "Quit"),
     ]
 
     def __init__(
@@ -502,3 +504,7 @@ class LineupEditScreen(ModalScreen[Optional[LineupPlan]]):
             self._close_bench()
             return
         self.dismiss(None)
+
+    def action_quit(self) -> None:
+        """Quit the app from this locked-in pregame setup screen."""
+        self.app.exit()
