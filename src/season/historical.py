@@ -24,10 +24,21 @@ The core transformation (see ``docs/specs/historical-season-mode.md`` Part 2):
   A doubleheader (game_num 1 & 2, same date/teams) yields two ``ScheduledGame``s
   on that day; ``game_id`` is assigned sequentially in play order.
 
+**Generated-schedule variant (Part 5).** :func:`build_generated_historical_season`
+is a "what if this league replayed a fresh season" option. It reuses the actual
+builder to resolve the league and its exact matchup multiset — every
+``(home, away)`` pairing the real year played, which *is* the year's structure
+(per-team game count, home/away split, and intra-/inter-division opponent
+weighting) — then **shuffles that multiset into a fresh day order** (deterministic
+given the year), re-grouping it so no team plays twice on a day. Same games,
+freshly ordered; everything downstream (``SeasonState``, controller, hub, save)
+is identical to the actual-schedule season.
+
 Pure model: no UI, no threads.
 """
 
-from typing import List, Optional
+import random
+from typing import List, Optional, Tuple
 
 from src.season.schedule import ScheduledGame, SeasonDay
 from src.season.state import LeagueTeam, SeasonState
@@ -190,4 +201,105 @@ def build_historical_season(
     # Step 6: wrap the prebuilt schedule (skips round-robin size/games checks).
     return SeasonState.from_schedule(
         teams, schedule, user_team_key=user_team_key
+    )
+
+
+def _matchups_of(schedule: List[SeasonDay]) -> List[Tuple[str, str]]:
+    """The flat ``(home_key, away_key)`` multiset of a built schedule.
+
+    This multiset *is* the season's structure: preserving it exactly preserves
+    every per-team game count, each team's home/away split, and the
+    intra-/inter-division opponent weighting. The generated variant keeps this
+    multiset and only re-orders it into days.
+    """
+    return [(game.home_key, game.away_key) for day in schedule for game in day]
+
+
+def _shuffle_into_days(
+    matchups: List[Tuple[str, str]], seed: int
+) -> List[SeasonDay]:
+    """Re-order a matchup multiset into a fresh, valid day-by-day schedule.
+
+    The matchups are shuffled deterministically (``seed``), then greedily
+    packed earliest-fit: each matchup joins the first day on which *neither*
+    team already plays, else it opens a new day. That keeps the round-robin
+    invariant "a team plays at most once per day" (doubleheaders in the real
+    slate are spread across days here — a fresh season rarely repeats them) and
+    yields ``len(days) >= max games any single team plays``. ``game_id`` runs
+    sequentially in the final day-major play order and ``day == list index``,
+    matching the round-robin / actual-historical schedules exactly.
+    """
+    shuffled = list(matchups)
+    random.Random(seed).shuffle(shuffled)
+
+    days: List[List[Tuple[str, str]]] = []
+    day_teams: List[set] = []  # teams already playing on each day
+    for home, away in shuffled:
+        for index, busy in enumerate(day_teams):
+            if home not in busy and away not in busy:
+                days[index].append((home, away))
+                busy.add(home)
+                busy.add(away)
+                break
+        else:
+            days.append([(home, away)])
+            day_teams.append({home, away})
+
+    schedule: List[SeasonDay] = []
+    game_id = 0
+    for index, day in enumerate(days):
+        day_games: SeasonDay = []
+        for home, away in day:
+            day_games.append(
+                ScheduledGame(
+                    game_id=game_id, day=index, home_key=home, away_key=away
+                )
+            )
+            game_id += 1
+        schedule.append(day_games)
+    return schedule
+
+
+def build_generated_historical_season(
+    repo,
+    year: int,
+    user_team_key: Optional[str] = None,
+    *,
+    seed: Optional[int] = None,
+) -> SeasonState:
+    """Build a *generated* full-league season from a year's real structure.
+
+    A "what if this league replayed a fresh season" variant of
+    :func:`build_historical_season`: it resolves the same league and the same
+    exact matchup multiset the real year played (so per-team game counts,
+    home/away splits, and opponent weighting are preserved to the game), then
+    **shuffles those matchups into a fresh day order** rather than replaying the
+    literal calendar. Everything downstream — standings (flat and grouped),
+    leaders, controller, save/resume — is the unchanged season machinery.
+
+    Args:
+        repo: A ``LahmanRepository`` (or compatible), as for
+            :func:`build_historical_season`.
+        year: The season year to base the generated schedule on (must have
+            ingested schedule data).
+        user_team_key: The ``"{team_id}-{year}"`` key of the user's team, or
+            ``None`` for a watch-only season. Must be a resolved league team.
+        seed: Shuffle seed; defaults to ``year`` so a given year reproducibly
+            generates the same schedule. Exposed mainly for tests.
+
+    Returns:
+        A ``SeasonState`` with a freshly ordered schedule, the same league (and
+        ``games_per_opponent=None``), and each team's game count equal to the
+        real season's.
+
+    Raises:
+        ValueError: If the year has no schedule data (or none were played).
+        HistoricalSeasonError: If any team id fails to resolve or load.
+    """
+    base = build_historical_season(repo, year, user_team_key=user_team_key)
+    schedule = _shuffle_into_days(
+        _matchups_of(base.schedule), seed=year if seed is None else seed
+    )
+    return SeasonState.from_schedule(
+        base.teams, schedule, user_team_key=user_team_key
     )
