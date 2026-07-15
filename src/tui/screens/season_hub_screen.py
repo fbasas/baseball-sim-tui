@@ -296,6 +296,9 @@ class SeasonHubScreen(Screen):
     def _compose_summary(self) -> ComposeResult:
         yield Static("═══════════  ⚾ SEASON COMPLETE  ═══════════", id="hub-day-header")
         yield Static(self._champion_line(), id="hub-champion")
+        if self._controller.state.is_grouped:
+            yield Static("PENNANT WINNERS", classes="hub-header")
+            yield Static(self._build_pennants(), classes="hub-section")
         yield Static("FINAL STANDINGS", classes="hub-header")
         yield Static(self._build_standings_table(), classes="hub-section")
         yield Static("LEADERS", classes="hub-header")
@@ -323,14 +326,45 @@ class SeasonHubScreen(Screen):
         return f"[bold #d4a843]🏆 {self._team_name(champion)} — League Champions[/]"
 
     def _build_standings_table(self) -> str:
-        """Standings in order, user's team marked with a caret + bold row."""
+        """Standings for the season: grouped by league/division for a historical
+        season, the single flat table for a round-robin one.
+
+        Round-robin seasons leave every ``LeagueTeam.league`` ``None`` and get
+        the unchanged single table; a historical season (any league set) gets
+        one header + block per league/division group, GB within each group.
+        """
+        state = self._controller.state
+        if state.is_grouped:
+            return self._build_grouped_standings_table()
+        return "\n".join(self._render_standings_rows(state.standings))
+
+    def _build_grouped_standings_table(self) -> str:
+        """Grouped standings: a titled header + row block per league/division."""
+        blocks = []
+        for group in self._controller.state.standings_by_group():
+            lines = [f"[bold #d4a843]{self._group_title(group.league, group.division)}[/]"]
+            lines.extend(self._render_standings_rows(group.rows))
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
+    def _group_title(self, league: Optional[str], division: Optional[str]) -> str:
+        """A group's header: ``AL East`` with a division, else the league alone."""
+        if division:
+            return f"{league} {division}"
+        return league or "League"
+
+    def _render_standings_rows(self, rows: List["StandingsRow"]) -> List[str]:
+        """Column header + one line per row, user's team marked (caret + bold).
+
+        Shared by the flat table and each grouped block so the ``W L Pct GB RS
+        RA`` columns line up identically everywhere.
+        """
         user_key = self._controller.state.user_team_key
         header = (
             f"   {_fit('Team', _TEAM_COL_WIDTH)} {'W':>3} {'L':>3} {'Pct':>5} "
             f"{'GB':>5} {'RS':>4} {'RA':>4}"
         )
         lines = [f"[#6b7d6b]{header}[/]"]
-        rows: List["StandingsRow"] = self._controller.state.standings
         for row in rows:
             is_user = row.key == user_key
             marker = "►" if is_user else " "
@@ -341,6 +375,15 @@ class SeasonHubScreen(Screen):
                 f"{row.runs_scored:>4} {row.runs_allowed:>4}"
             )
             lines.append(f"[bold]{body}[/]" if is_user else body)
+        return lines
+
+    def _build_pennants(self) -> str:
+        """One line per league pennant winner (``AL: 1927 Yankees``), by league."""
+        winners = self._controller.state.pennant_winners()
+        lines = [
+            f"[bold #d4a843]{league}: {self._team_name(winners[league])}[/]"
+            for league in sorted(winners)
+        ]
         return "\n".join(lines)
 
     def _build_matchups(self) -> str:

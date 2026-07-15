@@ -200,6 +200,145 @@ class TestChampionTiebreaks:
         assert season.champion == A  # run differential decides
 
 
+# --- Grouped standings + pennants (FRE-118) ---------------------------------
+
+
+def league_team(team_id, league, division=None):
+    """A league-tagged synthetic team; key is ``"{team_id}-2000"``."""
+    return LeagueTeam(
+        team_id=team_id, year=2000, display_name=team_id,
+        league=league, division=division,
+    )
+
+
+def grouped_state(teams, pairs) -> SeasonState:
+    """A season over ``teams`` whose results are one game per ``(winner, loser)``
+    key pair (winner home, 5-2). Schedule is irrelevant to standings math, so
+    an empty schedule keeps the fixture to just teams + results."""
+    state = SeasonState(teams=teams, games_per_opponent=None, schedule=[])
+    state.results = [
+        rec(winner, loser, 5, 2, game_id=i)
+        for i, (winner, loser) in enumerate(pairs)
+    ]
+    return state
+
+
+# 1969-style: two leagues, two divisions each (8 teams).
+_AE1, _AE2 = "AE1-2000", "AE2-2000"
+_AW1, _AW2 = "AW1-2000", "AW2-2000"
+_NE1, _NE2 = "NE1-2000", "NE2-2000"
+_NW1, _NW2 = "NW1-2000", "NW2-2000"
+
+_DIVISION_TEAMS = [
+    league_team("AE1", "AL", "E"), league_team("AE2", "AL", "E"),
+    league_team("AW1", "AL", "W"), league_team("AW2", "AL", "W"),
+    league_team("NE1", "NL", "E"), league_team("NE2", "NL", "E"),
+    league_team("NW1", "NL", "W"), league_team("NW2", "NL", "W"),
+]
+# Records: AW1 3-0, AE1 2-1, AW2 1-2, AE2 0-3 (AL); NE1 3-0, NW1 2-1,
+# NW2 1-2, NE2 0-3 (NL). AW1/NE1 are the pennant winners.
+_DIVISION_PAIRS = [
+    (_AW1, _AE2), (_AW1, _AW2), (_AW1, _AE1),
+    (_AE1, _AE2), (_AE1, _AW2), (_AW2, _AE2),
+    (_NE1, _NE2), (_NE1, _NW2), (_NE1, _NW1),
+    (_NW1, _NE2), (_NW1, _NW2), (_NW2, _NE2),
+]
+
+# Pre-division: two leagues, three teams each, no divisions.
+_PA1, _PA2, _PA3 = "PA1-2000", "PA2-2000", "PA3-2000"
+_PN1, _PN2, _PN3 = "PN1-2000", "PN2-2000", "PN3-2000"
+_FLAT_LEAGUE_TEAMS = [
+    league_team("PA1", "AL"), league_team("PA2", "AL"), league_team("PA3", "AL"),
+    league_team("PN1", "NL"), league_team("PN2", "NL"), league_team("PN3", "NL"),
+]
+# PA1 2-0, PA2 1-1, PA3 0-2; likewise PN1/PN2/PN3.
+_FLAT_LEAGUE_PAIRS = [
+    (_PA1, _PA2), (_PA1, _PA3), (_PA2, _PA3),
+    (_PN1, _PN2), (_PN1, _PN3), (_PN2, _PN3),
+]
+
+
+class TestIsGrouped:
+    def test_round_robin_is_not_grouped(self):
+        assert make_season(n=4, g=2).is_grouped is False
+
+    def test_any_league_set_is_grouped(self):
+        assert grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS).is_grouped is True
+
+    def test_flat_standings_unchanged_for_grouped_season(self):
+        # The league-wide table still ranks all 8 teams together.
+        state = grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS)
+        assert len(state.standings) == len(_DIVISION_TEAMS)
+
+
+class TestStandingsByGroup:
+    def test_division_league_groups_and_order(self):
+        groups = grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS).standings_by_group()
+        # Four groups, ordered by (league, division): AL E, AL W, NL E, NL W.
+        assert [(g.league, g.division) for g in groups] == [
+            ("AL", "E"), ("AL", "W"), ("NL", "E"), ("NL", "W"),
+        ]
+
+    def test_rows_partitioned_by_group(self):
+        groups = grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS).standings_by_group()
+        by_gd = {(g.league, g.division): g for g in groups}
+        assert {r.key for r in by_gd[("AL", "E")].rows} == {_AE1, _AE2}
+        assert {r.key for r in by_gd[("AL", "W")].rows} == {_AW1, _AW2}
+        # Each group is internally ordered best-first.
+        assert by_gd[("AL", "E")].rows[0].key == _AE1  # 2-1 over 0-3
+        assert by_gd[("AL", "W")].rows[0].key == _AW1  # 3-0 over 1-2
+
+    def test_gb_is_within_group_not_league_wide(self):
+        state = grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS)
+        groups = {(g.league, g.division): g for g in state.standings_by_group()}
+        ae = {r.key: r for r in groups[("AL", "E")].rows}
+        # AE1 (2-1) leads AL East -> group GB 0.0, though it trails the
+        # league-wide leader AW1 (3-0) by 1.0 game in the flat table.
+        assert ae[_AE1].games_behind == 0.0
+        flat = {r.key: r for r in state.standings}
+        assert flat[_AE1].games_behind == 1.0
+        # The division cellar sits 2.0 back within its own group.
+        assert ae[_AE2].games_behind == 2.0
+
+    def test_predivision_groups_by_league_only(self):
+        groups = grouped_state(
+            _FLAT_LEAGUE_TEAMS, _FLAT_LEAGUE_PAIRS
+        ).standings_by_group()
+        assert [(g.league, g.division) for g in groups] == [
+            ("AL", None), ("NL", None),
+        ]
+        by_league = {g.league: g for g in groups}
+        assert {r.key for r in by_league["AL"].rows} == {_PA1, _PA2, _PA3}
+        # GB within the (undivided) league: 0.0 / 1.0 / 2.0.
+        al = {r.key: r for r in by_league["AL"].rows}
+        assert al[_PA1].games_behind == 0.0
+        assert al[_PA2].games_behind == 1.0
+        assert al[_PA3].games_behind == 2.0
+
+
+class TestPennantWinners:
+    def test_best_record_per_league_with_divisions(self):
+        winners = grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS).pennant_winners()
+        assert winners == {"AL": _AW1, "NL": _NE1}
+
+    def test_best_record_per_league_predivision(self):
+        winners = grouped_state(
+            _FLAT_LEAGUE_TEAMS, _FLAT_LEAGUE_PAIRS
+        ).pennant_winners()
+        assert winners == {"AL": _PA1, "NL": _PN1}
+
+    def test_champion_is_best_overall_not_a_pennant_choice(self):
+        # champion stays the single best overall record (headline), drawn from
+        # across both leagues' pennant winners (AW1 vs NE1, both 3-0 +9 diff;
+        # key breaks the tie -> AW1).
+        state = grouped_state(_DIVISION_TEAMS, _DIVISION_PAIRS)
+        assert state.champion == _AW1
+        assert state.champion in state.pennant_winners().values()
+
+    def test_ungrouped_season_has_no_pennants(self):
+        assert make_season(n=4, g=2).pennant_winners() == {}
+
+
 # --- current_day / is_complete ----------------------------------------------
 
 
