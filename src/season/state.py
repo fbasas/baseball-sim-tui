@@ -130,6 +130,22 @@ class StandingsRow:
         return self.runs_scored - self.runs_allowed
 
 
+@dataclass(frozen=True)
+class StandingsGroup:
+    """One league/division block of standings (derived, never serialized).
+
+    ``division`` is ``None`` for a pre-1969 league (one group per league) and
+    the division id ("E"/"W"/...) once divisions exist. ``rows`` are ordered by
+    the same rule as the flat :attr:`SeasonState.standings` (Pct → run diff →
+    key) but with **games-behind computed within the group** — the leader of
+    each division sits at GB 0.0, not the overall leader.
+    """
+
+    league: Optional[str]
+    division: Optional[str]
+    rows: List[StandingsRow]
+
+
 @dataclass
 class _Tally:
     """Mutable per-team accumulator used while computing standings."""
@@ -295,15 +311,19 @@ class SeasonState:
                 home.losses += 1
         return tallies
 
-    @property
-    def standings(self) -> List[StandingsRow]:
-        """Standings sorted best-first (Pct, then run diff, then key).
+    def _rows_for_keys(
+        self, keys: List[str], tallies: Dict[str, _Tally]
+    ) -> List[StandingsRow]:
+        """Standings rows for ``keys``, best-first, GB within this key set.
 
-        Games-behind is measured against the leader; the leader's GB is 0.0.
+        The single ordering+GB routine behind both the flat :attr:`standings`
+        (all team keys) and each :class:`StandingsGroup` in
+        :meth:`standings_by_group` (one league/division's keys). Ordering is
+        Pct → run diff → key; games-behind is measured against this set's
+        leader, so a division leader sits at 0.0 within its own group.
         """
-        tallies = self._tallies()
         order = sorted(
-            self.team_keys,
+            keys,
             key=lambda key: (
                 -tallies[key].pct,
                 -tallies[key].run_differential,
@@ -331,24 +351,74 @@ class SeasonState:
             )
         return rows
 
-    # --- Champion -----------------------------------------------------------
+    @property
+    def standings(self) -> List[StandingsRow]:
+        """Standings sorted best-first (Pct, then run diff, then key).
+
+        Games-behind is measured against the leader; the leader's GB is 0.0.
+        The flat, league-wide table — used by round-robin seasons and overall
+        ranking, and unchanged by grouped standings.
+        """
+        return self._rows_for_keys(self.team_keys, self._tallies())
 
     @property
-    def champion(self) -> Optional[str]:
-        """The league leader (the champion once :attr:`is_complete`).
+    def is_grouped(self) -> bool:
+        """Whether this season has league grouping (any team's league set).
 
-        Tiebreak among teams with the top winning percentage: head-to-head
-        record among just those tied teams, then run differential, then key.
-        Returns ``None`` only for an empty league.
+        Historical seasons tag every :class:`LeagueTeam` with a league (and,
+        from 1969, a division), so grouped standings apply; round-robin seasons
+        leave league ``None`` and render the single flat table.
         """
-        if not self.teams:
-            return None
+        return any(team.league is not None for team in self.teams)
+
+    def standings_by_group(self) -> List[StandingsGroup]:
+        """Standings split into league/division groups, each GB-within-group.
+
+        Groups are ordered by ``(league, division)`` with ``None`` sorting
+        first, so the output is deterministic. A team whose ``division`` is
+        ``None`` (pre-1969) groups under its league alone. Teams whose
+        ``league`` is ``None`` group together under an all-``None`` group — in
+        practice a grouped season tags every team, but the flat
+        :attr:`standings` remains the right view for an ungrouped one.
+        """
         tallies = self._tallies()
-        top_pct = max(tally.pct for tally in tallies.values())
-        tied = [key for key in self.team_keys if tallies[key].pct == top_pct]
+        keys_by_group: Dict[tuple, List[str]] = {}
+        for team in self.teams:
+            keys_by_group.setdefault(
+                (team.league, team.division), []
+            ).append(team.key)
+        groups: List[StandingsGroup] = []
+        for league, division in sorted(
+            keys_by_group, key=lambda gk: (gk[0] or "", gk[1] or "")
+        ):
+            groups.append(
+                StandingsGroup(
+                    league=league,
+                    division=division,
+                    rows=self._rows_for_keys(
+                        keys_by_group[(league, division)], tallies
+                    ),
+                )
+            )
+        return groups
+
+    # --- Champion -----------------------------------------------------------
+
+    def _best_among(
+        self, keys: List[str], tallies: Dict[str, _Tally]
+    ) -> str:
+        """The best record among ``keys`` (assumed non-empty).
+
+        Top winning percentage, then head-to-head among just the tied teams,
+        then run differential, then key — the one tiebreak ladder behind both
+        the overall :attr:`champion` and each league's
+        :meth:`pennant_winners`. No cross-league step: each call ranks only the
+        keys it is given.
+        """
+        top_pct = max(tallies[key].pct for key in keys)
+        tied = [key for key in keys if tallies[key].pct == top_pct]
         if len(tied) == 1:
             return tied[0]
-
         h2h = self._head_to_head_wins(tied)
         return min(
             tied,
@@ -358,6 +428,39 @@ class SeasonState:
                 key,
             ),
         )
+
+    @property
+    def champion(self) -> Optional[str]:
+        """The league leader (the champion once :attr:`is_complete`).
+
+        Tiebreak among teams with the top winning percentage: head-to-head
+        record among just those tied teams, then run differential, then key.
+        The headline for both round-robin and grouped seasons — the best
+        overall record, unchanged by grouping. Returns ``None`` only for an
+        empty league.
+        """
+        if not self.teams:
+            return None
+        return self._best_among(self.team_keys, self._tallies())
+
+    def pennant_winners(self) -> Dict[str, str]:
+        """Best-record team key per league (for the season-summary pennants).
+
+        Keyed by league id; each value is that league's leader by the same
+        tiebreak ladder as :attr:`champion`, ranked over only that league's
+        teams (no cross-league tiebreak). Teams with league ``None`` win no
+        pennant, so an ungrouped season yields an empty dict.
+        """
+        tallies = self._tallies()
+        keys_by_league: Dict[str, List[str]] = {}
+        for team in self.teams:
+            if team.league is None:
+                continue
+            keys_by_league.setdefault(team.league, []).append(team.key)
+        return {
+            league: self._best_among(keys, tallies)
+            for league, keys in keys_by_league.items()
+        }
 
     def _head_to_head_wins(self, keys: List[str]) -> Dict[str, int]:
         """Wins for each key counting only games among the given key set."""

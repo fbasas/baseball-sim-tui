@@ -120,6 +120,10 @@ _HUB_HELPERS = (
     "_day_header",
     "_champion_line",
     "_build_standings_table",
+    "_build_grouped_standings_table",
+    "_group_title",
+    "_render_standings_rows",
+    "_build_pennants",
     "_build_matchups",
     "_build_recent_results",
     "_build_summary_leaders",
@@ -266,6 +270,94 @@ def test_standings_truncates_overlong_name_with_ellipsis():
     assert cell.endswith("…")
     assert "Phillies" not in phi_line
     assert len(cell) == _TEAM_COL_WIDTH
+
+
+# --- Grouped standings + pennants (FRE-118) --------------------------------
+
+# Two leagues, two divisions each; keys are "{team_id}-2000".
+_GROUPED_TEAMS = [
+    LeagueTeam("AE1", 2000, "AL East One", league="AL", division="E"),
+    LeagueTeam("AE2", 2000, "AL East Two", league="AL", division="E"),
+    LeagueTeam("AW1", 2000, "AL West One", league="AL", division="W"),
+    LeagueTeam("AW2", 2000, "AL West Two", league="AL", division="W"),
+    LeagueTeam("NL1", 2000, "NL One", league="NL", division="E"),
+    LeagueTeam("NL2", 2000, "NL Two", league="NL", division="E"),
+]
+
+
+def _grouped_state(user_key="AE1-2000"):
+    """A league-tagged season (no round-robin schedule) with hand-set results:
+    AE1 beats AW1 (so AE1 leads AL East, AW1 leads AL West on its own game)."""
+    state = SeasonState(
+        teams=list(_GROUPED_TEAMS), games_per_opponent=None, schedule=[],
+        user_team_key=user_key,
+    )
+    state.results = [
+        SeasonGameRecord(0, 0, "AE1-2000", "AE2-2000", 5, 2, 9),  # AE1 1-0
+        SeasonGameRecord(1, 0, "AW1-2000", "AW2-2000", 5, 2, 9),  # AW1 1-0
+        SeasonGameRecord(2, 0, "NL1-2000", "NL2-2000", 5, 2, 9),  # NL1 1-0
+    ]
+    return state
+
+
+def test_grouped_standings_renders_a_block_per_group():
+    mock = _hub_mock(_controller(_grouped_state()))
+
+    table = SeasonHubScreen._build_standings_table(mock)
+    stripped = _strip_markup(table)
+
+    # A titled header for each league/division group, in (league, division) order.
+    for title in ("AL E", "AL W", "NL E"):
+        assert title in stripped
+    assert stripped.index("AL E") < stripped.index("AL W") < stripped.index("NL E")
+    # Every club appears under some group.
+    for team in _GROUPED_TEAMS:
+        assert team.display_name in stripped
+
+
+def test_grouped_standings_gb_is_within_group():
+    # AE1 leads AL East (GB 0 / "—"); AE2 sits behind within that group only.
+    mock = _hub_mock(_controller(_grouped_state()))
+    lines = _strip_markup(SeasonHubScreen._build_standings_table(mock)).splitlines()
+
+    ae1 = next(l for l in lines if "AL East One" in l)
+    aw1 = next(l for l in lines if "AL West One" in l)
+    # Both division leaders show the em-dash GB even though neither trails the
+    # other in a flat league-wide table.
+    assert "—" in ae1
+    assert "—" in aw1
+
+
+def test_grouped_standings_marks_user_team():
+    mock = _hub_mock(_controller(_grouped_state(user_key="AE1-2000")))
+    lines = SeasonHubScreen._build_standings_table(mock).splitlines()
+
+    user_line = next(l for l in lines if "AL East One" in l)
+    assert "►" in user_line
+    assert user_line.startswith("[bold]")
+
+
+def test_round_robin_still_renders_single_flat_table():
+    # A round-robin (ungrouped) season is untouched: one header, no group titles.
+    mock = _hub_mock(_controller(_make_state()))
+    table = SeasonHubScreen._build_standings_table(mock)
+    stripped = _strip_markup(table)
+
+    assert "AL E" not in stripped and "NL" not in stripped
+    # Exactly one column header (the flat table), then one row per team.
+    assert stripped.count("Team") == 1
+    assert len(table.splitlines()) == 1 + len(_TEAMS)
+
+
+def test_pennants_block_lists_winner_per_league():
+    mock = _hub_mock(_controller(_grouped_state()))
+
+    text = _strip_markup(SeasonHubScreen._build_pennants(mock))
+    lines = text.splitlines()
+
+    assert len(lines) == 2  # one per league
+    assert "AL: AL East One" in text   # AE1 leads the AL
+    assert "NL: NL One" in text        # NL1 leads the NL
 
 
 # ---------------------------------------------------------------------------
