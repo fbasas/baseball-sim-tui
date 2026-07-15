@@ -231,6 +231,7 @@ class SeasonHubScreen(Screen):
         Binding("d", "sim_day", "Sim day"),
         Binding("a", "sim_ahead", "Sim ahead"),
         Binding("l", "leaders", "Leaders"),
+        Binding("t", "team_stats", "Team stats"),
         Binding("ctrl+s", "save", "Save"),
         Binding("n", "new_season", "New season"),
         Binding("m", "main_menu", "Main menu"),
@@ -410,3 +411,22 @@ class SeasonHubScreen(Screen):
     def action_leaders(self) -> None:
         """Show the league leaders subscreen (owned by the hub, not the app)."""
         self.app.push_screen(LeagueLeadersScreen(self._controller))
+
+    def action_team_stats(self) -> None:
+        """Show the per-team stat page (owned by the hub, like leaders).
+
+        Opens on the user's team when there is one, else the standings leader
+        (a watch-only season has no user team), falling back to the first league
+        team. Imported lazily to avoid a module-load cycle: ``TeamStatsScreen``
+        imports the shared render helpers from this module.
+        """
+        from src.tui.screens.team_stats_screen import TeamStatsScreen
+
+        state = self._controller.state
+        if state.user_team_key is not None:
+            initial_key = state.user_team_key
+        elif state.standings:
+            initial_key = state.standings[0].key
+        else:
+            initial_key = state.teams[0].key
+        self.app.push_screen(TeamStatsScreen(self._controller, initial_key))

@@ -14,6 +14,7 @@ from .season_hub_screen import LeagueLeadersScreen, SeasonHubScreen
 from .series_status_screen import SeriesStatusScreen
 from .substitution_menu import SubstitutionMenu
 from .team_select_screen import TeamSelectScreen
+from .team_stats_screen import TeamStatsScreen
 
 __all__ = [
     "ChoiceScreen",
@@ -24,4 +25,5 @@ __all__ = [
     "SeriesStatusScreen",
     "SubstitutionMenu",
     "TeamSelectScreen",
+    "TeamStatsScreen",
 ]
