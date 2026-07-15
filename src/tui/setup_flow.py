@@ -37,6 +37,7 @@ _MODE_CHOICES = [
     ("series5", "Best-of-5 series"),
     ("series7", "Best-of-7 series"),
     ("season", "Season — round-robin league, standings, full stats"),
+    ("historical", "Historical season — a real year's full league on its actual schedule"),
     ("load", "Load saved game — resume from disk"),
 ]
 
@@ -94,6 +95,10 @@ class SetupFlow:
             the mode list. The season branch diverges from the two-team chain
             (a league builder loop), so the app hands off to a separate
             ``SeasonSetupFlow`` here. Optional — omit to disable season mode.
+        on_historical: Called with no arguments when the user picks "Historical
+            season" from the mode list. Like ``on_season``, this hands off to a
+            separate year-based flow (``HistoricalSeasonSetupFlow``). Optional —
+            omit to disable historical mode.
     """
 
     def __init__(
@@ -115,6 +120,7 @@ class SetupFlow:
         on_cancel: Callable[[], None],
         on_load: Optional[Callable[[Path], None]] = None,
         on_season: Optional[Callable[[], None]] = None,
+        on_historical: Optional[Callable[[], None]] = None,
     ) -> None:
         self._app = app
         self._repo = repo
@@ -122,6 +128,7 @@ class SetupFlow:
         self._on_cancel = on_cancel
         self._on_load = on_load
         self._on_season = on_season
+        self._on_historical = on_historical
         self.config: Optional[GameConfig] = None
         self.away_team: Optional[Team] = None
         self.home_team: Optional[Team] = None
@@ -144,6 +151,9 @@ class SetupFlow:
                 return
             if mode_id == "season":
                 self._select_season()
+                return
+            if mode_id == "historical":
+                self._select_historical()
                 return
             self._mode_id = mode_id
             self._select_control()
@@ -195,6 +205,20 @@ class SetupFlow:
             self._select_mode()
             return
         self._on_season()
+
+    def _select_historical(self) -> None:
+        """Hand off to the separate ``HistoricalSeasonSetupFlow`` (year-based).
+
+        Historical mode's setup — a year picker, a full-league build on the real
+        schedule, and the shared role-card pass — has nothing in common with the
+        two-team single/series chain, so it lives in its own flow that the app
+        wires via ``on_historical``. If no ``on_historical`` was supplied, this
+        is a safe no-op back to the menu.
+        """
+        if self._on_historical is None:
+            self._select_mode()
+            return
+        self._on_historical()
 
     def _select_control(self) -> None:
         def on_control_chosen(control_id: Optional[str]) -> None:

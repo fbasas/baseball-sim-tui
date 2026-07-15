@@ -35,6 +35,7 @@ from .screens.choice_screen import ChoiceScreen
 from .screens.pitcher_select_screen import PitcherSelectScreen
 from .screens.season_hub_screen import HubChoice, SeasonHubScreen
 from .screens.series_status_screen import SeriesStatusScreen
+from .historical_setup_flow import HistoricalSeasonSetupFlow
 from .season_setup_flow import SeasonSetupFlow
 from .setup_flow import SetupFlow, pitcher_rows
 
@@ -107,6 +108,7 @@ class BaseballSimApp(App):
             on_cancel=self.exit,
             on_load=self._resume_saved_game,
             on_season=self._start_season_setup,
+            on_historical=self._start_historical_setup,
         ).begin()
 
     # --- Season flow ------------------------------------------------------
@@ -121,6 +123,24 @@ class BaseballSimApp(App):
         the mode menu via ``start_setup``.
         """
         SeasonSetupFlow(
+            self,
+            self.repo,
+            on_complete=self._on_season_ready,
+            on_cancel=self.start_setup,
+        ).begin()
+
+    def _start_historical_setup(self) -> None:
+        """Run the historical-season setup, then push the season hub.
+
+        Picked from the mode menu's "Historical season" entry.
+        ``HistoricalSeasonSetupFlow`` owns the year / league-build / your-team
+        chain and the shared role-card pass, then hands back a fully built
+        ``SeasonController`` — which the *existing* ``_on_season_ready`` pushes as
+        a ``mode == "season"`` season (historical seasons reuse the season hub,
+        controller, and ``kind == "season"`` save/resume wholesale). Backing out
+        of the year picker (or a failed role-card pass) returns to the mode menu.
+        """
+        HistoricalSeasonSetupFlow(
             self,
             self.repo,
             on_complete=self._on_season_ready,
