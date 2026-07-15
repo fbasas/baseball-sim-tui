@@ -1,6 +1,7 @@
 """Data models for baseball statistics from Lahman database."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -98,3 +99,26 @@ class TeamSeason:
     park_factor_batting: int = 100  # BPF from Teams table
     park_factor_pitching: int = 100  # PPF from Teams table
     games: int = 0  # G from Teams table (season length actually played)
+
+
+@dataclass
+class ScheduleRow:
+    """One scheduled game from the Retrosheet Schedules table.
+
+    Teams are Retrosheet ids (resolve to Lahman teamIDs via
+    ``LahmanRepository.retro_to_lahman_team``). ``date`` and ``makeup_date``
+    are ``yyyymmdd`` integers; ``postponed``/``makeup_date`` are ``None`` when
+    the game was played as scheduled.
+    """
+
+    year: int
+    date: int  # yyyymmdd
+    game_num: int  # 0 single · 1 first of DH · 2 second of DH
+    dow: str  # Sun..Sat
+    vis_team: str  # Retrosheet visiting-team id
+    vis_league: str
+    home_team: str  # Retrosheet home-team id
+    home_league: str
+    time_of_day: str  # D/N/A/E (case as published)
+    postponed: Optional[str] = None  # non-empty ⇒ not played as scheduled
+    makeup_date: Optional[int] = None  # yyyymmdd if replayed later

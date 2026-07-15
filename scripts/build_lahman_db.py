@@ -86,7 +86,13 @@ REQUIRED_TABLES = {
     "Teams": {
         "csv_name": "Teams.csv",
         "columns": [
-            "yearID", "lgID", "teamID", "franchID", "divID", "Rank", "G", "Ghome",
+            # teamIDretro maps Lahman teamID <-> Retrosheet team id; it is the
+            # join key between the Retrosheet Schedules table and Lahman
+            # rosters/stats (see docs/adr/001-historical-schedule-data.md).
+            # Databases built before this column was added must be rebuilt to
+            # gain it.
+            "yearID", "lgID", "teamID", "franchID", "divID", "teamIDretro",
+            "Rank", "G", "Ghome",
             "W", "L", "DivWin", "WCWin", "LgWin", "WSWin", "R", "AB", "H",
             "2B", "3B", "HR", "BB", "SO", "SB", "CS", "HBP", "SF", "RA",
             "ER", "ERA", "CG", "SHO", "SV", "IPouts", "HA", "HRA", "BBA",

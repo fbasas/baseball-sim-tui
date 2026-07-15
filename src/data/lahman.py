@@ -7,6 +7,7 @@ from src.data.models import (
     BattingStats,
     PitchingStats,
     PlayerInfo,
+    ScheduleRow,
     TeamSeason,
 )
 
@@ -334,6 +335,119 @@ class LahmanRepository:
                 park_factor_pitching=int(row["PPF"] or 100),
                 games=int(row["G"] or 0),
             )
+        return None
+
+    def get_schedule(self, year: int) -> List[ScheduleRow]:
+        """Get every scheduled game for a season, ordered by (date, game_num).
+
+        Reads the Retrosheet ``Schedules`` table (populated by
+        ``scripts/build_schedule_db.py``). Teams are Retrosheet ids; resolve
+        them with :meth:`retro_to_lahman_team`.
+
+        Args:
+            year: Season year.
+
+        Returns:
+            List of :class:`ScheduleRow`, ordered by ``(date, game_num)``.
+            Empty if the year has no schedule data.
+        """
+        cursor = self.conn.execute(
+            """
+            SELECT year, date, game_num, dow, vis_team, vis_league,
+                   home_team, home_league, time_of_day, postponed, makeup_date
+            FROM Schedules
+            WHERE year = ?
+            ORDER BY date, game_num
+            """,
+            (year,),
+        )
+        rows = []
+        for row in cursor.fetchall():
+            makeup = row["makeup_date"]
+            rows.append(
+                ScheduleRow(
+                    year=int(row["year"]),
+                    date=int(row["date"]),
+                    game_num=int(row["game_num"]),
+                    dow=row["dow"] or "",
+                    vis_team=row["vis_team"] or "",
+                    vis_league=row["vis_league"] or "",
+                    home_team=row["home_team"] or "",
+                    home_league=row["home_league"] or "",
+                    time_of_day=row["time_of_day"] or "",
+                    postponed=row["postponed"],
+                    makeup_date=int(makeup) if makeup is not None else None,
+                )
+            )
+        return rows
+
+    def has_schedule(self, year: int) -> bool:
+        """Whether the Schedules table has any rows for the year.
+
+        Drives which years the historical-season setup flow can offer. Returns
+        ``False`` when the table is absent (a database built before schedule
+        ingestion), not just when the year is missing.
+
+        Args:
+            year: Season year.
+
+        Returns:
+            True if at least one schedule row exists for the year.
+        """
+        try:
+            cursor = self.conn.execute(
+                "SELECT 1 FROM Schedules WHERE year = ? LIMIT 1", (year,)
+            )
+        except sqlite3.OperationalError:
+            # Schedules table doesn't exist yet.
+            return False
+        return cursor.fetchone() is not None
+
+    def retro_to_lahman_team(
+        self, retro_id: str, year: int
+    ) -> Optional[str]:
+        """Resolve a Retrosheet team id to a Lahman teamID for a season.
+
+        Uses the ``teamIDretro`` column added to the Teams table, falling back
+        to an exact ``teamID == retro_id`` match (correct for most modern
+        teams). Returns ``None`` if neither resolves for that year.
+
+        Args:
+            retro_id: Retrosheet team id from the schedule (e.g. ``NYA``).
+            year: Season year (Retrosheet ids can differ across a franchise's
+                history, so the mapping is year-scoped).
+
+        Returns:
+            The Lahman ``teamID``, or ``None`` if unresolved.
+        """
+        try:
+            cursor = self.conn.execute(
+                """
+                SELECT teamID FROM Teams
+                WHERE yearID = ? AND teamIDretro = ?
+                LIMIT 1
+                """,
+                (year, retro_id),
+            )
+            row = cursor.fetchone()
+            if row and row["teamID"]:
+                return row["teamID"]
+        except sqlite3.OperationalError:
+            # teamIDretro column absent (DB predates the join key); fall back
+            # to the exact teamID match below.
+            pass
+
+        cursor = self.conn.execute(
+            """
+            SELECT teamID FROM Teams
+            WHERE yearID = ? AND teamID = ?
+            LIMIT 1
+            """,
+            (year, retro_id),
+        )
+        row = cursor.fetchone()
+        if row and row["teamID"]:
+            return row["teamID"]
         return None
 
     def close(self) -> None:
