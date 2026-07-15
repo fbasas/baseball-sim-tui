@@ -25,7 +25,7 @@ import sqlite3
 import threading
 from types import SimpleNamespace
 
-import src.tui.season_setup_flow as season_flow_module
+import src.tui.role_card_pass as role_card_pass_module
 from src.game.team import Team
 from src.manager.roles import TeamRoleCard, save_role_card
 from src.tui.screens.choice_screen import ChoiceScreen
@@ -146,7 +146,7 @@ def test_full_happy_path_builds_controller(monkeypatch, tmp_path):
     # Spy: assert no build is attempted when every card exists.
     build_calls = []
     monkeypatch.setattr(
-        season_flow_module,
+        role_card_pass_module,
         "build_role_card",
         lambda *a, **k: build_calls.append(a) or None,
     )
@@ -358,7 +358,7 @@ def test_missing_card_is_built_in_process_and_season_starts(monkeypatch, tmp_pat
             lineup_positions={},
         )
 
-    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
+    monkeypatch.setattr(role_card_pass_module, "build_role_card", fake_build)
 
     # Repo must expose the gather methods the build core calls.
     repo = SimpleNamespace(
@@ -391,7 +391,7 @@ def test_unbuildable_team_blocks_season_start(monkeypatch, tmp_path):
     def fake_build(*args, **kwargs):
         raise ValueError("no usable pitchers")
 
-    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
+    monkeypatch.setattr(role_card_pass_module, "build_role_card", fake_build)
 
     repo = SimpleNamespace(
         get_available_years=lambda: [2016, 1975, 1927, 1906],
@@ -422,7 +422,7 @@ def test_missing_cards_run_on_a_worker(monkeypatch, tmp_path):
     for team_id, year in _FOUR_TEAMS[:-1]:
         _write_card(tmp_path, team_id, year)
     monkeypatch.setattr(
-        season_flow_module,
+        role_card_pass_module,
         "build_role_card",
         lambda *a, **k: TeamRoleCard("DDD", 1906, {}, {}, [], {}),
     )
@@ -542,7 +542,7 @@ def test_role_card_gather_runs_on_main_thread_not_worker(monkeypatch, tmp_path):
         build_threads.append(threading.get_ident())
         return TeamRoleCard("DDD", 1906, {}, {}, [], {})
 
-    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
+    monkeypatch.setattr(role_card_pass_module, "build_role_card", fake_build)
 
     repo = ThreadAffineRepo()  # owner == main/test thread
     app, captured = ThreadingApp(), {}
@@ -572,7 +572,7 @@ def test_worker_surfaces_unexpected_failure_and_aborts(monkeypatch, tmp_path):
     def fake_build(*a, **k):
         raise RuntimeError("disk gremlins")
 
-    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
+    monkeypatch.setattr(role_card_pass_module, "build_role_card", fake_build)
 
     repo = SimpleNamespace(
         get_available_years=lambda: [2016, 1975, 1927, 1906],
@@ -609,44 +609,6 @@ def test_all_cards_present_uses_no_worker(monkeypatch, tmp_path):
     app.last_callback("AAA-1927")
 
     assert "controller" in captured
-
-
-# ---------------------------------------------------------------------------
-# Role-card pass unit seams (mock-self, no full drive)
-# ---------------------------------------------------------------------------
-
-
-def test_build_role_cards_collects_failures(monkeypatch, tmp_path):
-    from src.season.state import LeagueTeam
-
-    teams = [
-        LeagueTeam("AAA", 1927, "1927 AAA"),
-        LeagueTeam("BBB", 1975, "1975 BBB"),
-    ]
-
-    def fake_build(*args, **kwargs):
-        raise ValueError("bad")
-
-    monkeypatch.setattr(season_flow_module, "build_role_card", fake_build)
-    repo = SimpleNamespace(
-        get_team_season=lambda tid, yr: None,
-        get_team_roster=lambda tid, yr: [],
-        get_batting_stats=lambda pid, yr: None,
-        get_pitching_stats=lambda pid, yr: None,
-        get_appearances=lambda tid, yr: [],
-    )
-    flow = SeasonSetupFlow(
-        FakeApp(), repo, on_complete=lambda c: None, on_cancel=lambda: None,
-        roles_dir=tmp_path,
-    )
-    # Inputs are gathered on the main thread (here), then built (pure) below.
-    prepared = [(team, flow._gather_role_card_inputs(team)) for team in teams]
-    progress = []
-    failures = flow._build_role_cards(
-        prepared, progress=lambda i, n, t: progress.append((i, n, t.key))
-    )
-    assert failures == ["1927 AAA", "1975 BBB"]
-    assert progress == [(1, 2, "AAA-1927"), (2, 2, "BBB-1975")]
 
 
 # ---------------------------------------------------------------------------

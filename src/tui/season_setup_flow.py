@@ -18,12 +18,13 @@ Two things set this flow apart from the two-team ``SetupFlow`` chain:
   the games question, and so on back to the mode menu.
 - **The in-process role-card pass.** Every league team — the user's included,
   since its games can be simmed and ``play_ai_game`` needs a context for both
-  dugouts — needs a ``data/roles/<TEAMID>-<YEAR>.json`` role card. Any that are
-  missing are built in-process (``build_role_card`` + ``save_role_card``, the
-  importable core of ``scripts/build_roles.py``) on a Textual worker with a
-  progress ``notify``. A team whose card can't be built (inference
-  ``ValueError``) is reported by name and **blocks season start** — season mode
-  has no silent manual-control fallback (unlike ``app._build_context``).
+  dugouts — needs a ``data/roles/<TEAMID>-<YEAR>.json`` role card. The shared
+  :class:`~src.tui.role_card_pass.RoleCardPass` builds any that are missing on a
+  Textual worker (gathering DB inputs on the main thread first), reporting a team
+  whose card can't be built by name and **blocking season start** — season mode
+  has no silent manual-control fallback (unlike ``app._build_context``). The same
+  pass backs the historical flow, so the sqlite-thread-affinity fix lives in one
+  place.
 """
 
 from pathlib import Path
@@ -35,11 +36,10 @@ from src.game.manager_adapter import (
     load_manager_for_team,
 )
 from src.game.team import Team
-from src.manager.inference import build_role_card
-from src.manager.roles import role_card_path, save_role_card
 from src.season.controller import SeasonController
 from src.season.state import LeagueTeam, SeasonState
 
+from .role_card_pass import RoleCardPass
 from .screens.choice_screen import ChoiceScreen
 from .screens.team_select_screen import TeamSelectScreen
 
@@ -243,161 +243,21 @@ class SeasonSetupFlow:
 
     # --- Role-card pass -----------------------------------------------------
 
-    def _missing_role_card_teams(self) -> List[LeagueTeam]:
-        """League teams with no role card on disk (need building)."""
-        return [
-            team
-            for team in self._league_teams
-            if not role_card_path(team.team_id, team.year, self._roles_dir).exists()
-        ]
-
     def _start_role_card_pass(self) -> None:
-        """Build any missing role cards on a worker, then launch the season.
+        """Build any missing role cards, then launch the season.
 
-        With every card already present, the season launches immediately (no
-        build attempted, no worker). Otherwise every missing team's Lahman
-        inputs are gathered **here on the main thread** — the ``LahmanRepository``
-        wraps a single thread-affine ``sqlite3`` connection, so touching it from
-        the worker would raise ``sqlite3.ProgrammingError`` (not a ``ValueError``,
-        so it would escape the per-team guard and silently kill the worker). Only
-        the pure, CPU-bound ``build_role_card`` + ``save_role_card`` runs on the
-        background Textual worker, so the UI stays responsive; per-team progress
-        is surfaced via ``notify`` and the continuation runs back on the main
-        thread (``_finish_role_card_pass``).
+        Delegates to the shared :class:`~src.tui.role_card_pass.RoleCardPass`
+        (gather-on-main-thread + worker-build + progress + blocking), which the
+        historical flow also uses. Every card present ⇒ the season launches
+        immediately; an unbuildable team ⇒ the pass names it and returns to the
+        mode menu via ``on_cancel`` (season mode never silently degrades a dugout
+        to manual control).
         """
-        missing = self._missing_role_card_teams()
-        if not missing:
-            self._launch_season()
-            return
-
-        # Read the DB on the owning (main) thread; the worker gets plain data.
-        prepared = [(team, self._gather_role_card_inputs(team)) for team in missing]
-
-        self._app.notify(
-            f"Building manager role cards for {len(missing)} team(s)…",
-            title="Season setup",
-            timeout=6,
+        RoleCardPass(self._app, self._repo, self._roles_dir).run(
+            self._league_teams,
+            on_success=self._launch_season,
+            on_failure=self._on_cancel,
         )
-
-        def work() -> None:
-            try:
-                failures = self._build_role_cards(
-                    prepared, progress=self._notify_progress
-                )
-            except Exception as exc:  # noqa: BLE001 - unexpected: surface, never hang
-                self._app.call_from_thread(self._fail_role_card_pass, str(exc))
-                return
-            self._app.call_from_thread(self._finish_role_card_pass, failures)
-
-        self._app.run_worker(
-            work, thread=True, exclusive=True, group="season_role_cards"
-        )
-
-    def _notify_progress(self, index: int, total: int, team: LeagueTeam) -> None:
-        """Report role-card build progress from the worker thread."""
-        self._app.call_from_thread(
-            self._app.notify,
-            f"Building role card {index}/{total}: {team.display_name}",
-            title="Season setup",
-        )
-
-    def _gather_role_card_inputs(self, team: LeagueTeam) -> Tuple:
-        """Read one team-season's Lahman inputs (the ``build_roles`` gather).
-
-        **Runs on the main thread** — every call here hits the thread-affine
-        ``sqlite3`` connection, so it must never run on the worker. Returns the
-        plain ``(team_season, roster, batting, pitching, appearances)`` tuple the
-        pure build consumes, mirroring ``scripts/build_roles.py``'s gather.
-        """
-        repo = self._repo
-        team_id, year = team.team_id, team.year
-        team_season = repo.get_team_season(team_id, year)
-        roster = repo.get_team_roster(team_id, year)
-        batting = {}
-        pitching = {}
-        for player in roster:
-            b = repo.get_batting_stats(player.player_id, year)
-            if b:
-                batting[player.player_id] = b
-            p = repo.get_pitching_stats(player.player_id, year)
-            if p:
-                pitching[player.player_id] = p
-        appearances = repo.get_appearances(team_id, year)
-        return (team_season, roster, batting, pitching, appearances)
-
-    def _build_role_cards(
-        self,
-        prepared: List[Tuple[LeagueTeam, Tuple]],
-        progress: Optional[Callable[[int, int, LeagueTeam], None]] = None,
-    ) -> List[str]:
-        """Build+save each prepared role card; return the names that failed.
-
-        ``prepared`` is a list of ``(team, gathered_inputs)`` produced on the
-        main thread by :meth:`_gather_role_card_inputs`; this method is pure (no
-        DB access) so it is safe to run on the worker. A team whose inference
-        raises ``ValueError`` is skipped and its display name collected — the
-        caller reports the collected names and blocks the season. ``progress``
-        (if given) is called before each build with ``(index, total, team)``.
-        """
-        failures: List[str] = []
-        total = len(prepared)
-        for index, (team, inputs) in enumerate(prepared, start=1):
-            if progress is not None:
-                progress(index, total, team)
-            try:
-                self._build_one_role_card(inputs)
-            except ValueError:
-                failures.append(team.display_name)
-        return failures
-
-    def _build_one_role_card(self, inputs: Tuple) -> None:
-        """Infer and persist one team-season's role card (the build_roles core).
-
-        Pure and DB-free: takes the ``(team_season, roster, batting, pitching,
-        appearances)`` gathered on the main thread, calls ``build_role_card``
-        (raises ``ValueError`` when inference can't proceed), and writes the
-        artifact into ``roles_dir``. Safe to run on the worker thread.
-        """
-        team_season, roster, batting, pitching, appearances = inputs
-        card = build_role_card(team_season, roster, batting, pitching, appearances)
-        save_role_card(card, self._roles_dir)
-
-    def _finish_role_card_pass(self, failures: List[str]) -> None:
-        """Continue to season start, or report unbuildable teams and abort.
-
-        Runs on the main thread. Any failures name the offending team(s) and
-        block the season (returning to the mode menu via ``on_cancel``) — season
-        mode never silently degrades a dugout to manual control.
-        """
-        if failures:
-            names = ", ".join(failures)
-            self._app.notify(
-                f"Couldn't build a manager role card for: {names}. "
-                "Every team needs one to start a season — season not started.",
-                title="Season setup failed",
-                severity="error",
-                timeout=12,
-            )
-            self._on_cancel()
-            return
-        self._launch_season()
-
-    def _fail_role_card_pass(self, message: str) -> None:
-        """Report an unexpected worker failure and abort (runs on main thread).
-
-        The per-team ``ValueError`` path (an unbuildable team) is handled by
-        :meth:`_finish_role_card_pass`; this is the safety net for any *other*
-        error escaping the worker (e.g. a save I/O error) so the flow reports it
-        and returns to the mode menu instead of hanging on the progress toast.
-        """
-        self._app.notify(
-            f"Season setup failed while building role cards: {message}. "
-            "Season not started.",
-            title="Season setup failed",
-            severity="error",
-            timeout=12,
-        )
-        self._on_cancel()
 
     # --- Launch -------------------------------------------------------------
 
