@@ -71,7 +71,7 @@ class BaseballSimApp(App):
     CSS_PATH = "styles/game.tcss"
 
     TITLE = "⚾ Baseball Time Machine"
-    SUB_TITLE = "any team · any era · Lahman database"
+    SUB_TITLE = "any team · any era · data: Lahman + Retrosheet"
 
     def compose(self) -> ComposeResult:
         """Compose the base screen layout (shown behind setup modals).
