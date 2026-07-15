@@ -27,11 +27,18 @@ class LeagueTeam:
 
     ``key`` is the ``"{team_id}-{year}"`` string used everywhere else
     (schedule, standings, ledgers) to refer to this team.
+
+    ``league`` and ``division`` are set for historical seasons (grouped
+    standings, from ``TeamSeason``) and left ``None`` for round-robin leagues;
+    both default to ``None`` and are absent-key tolerant on load, so existing
+    round-robin ``LeagueTeam`` serializations round-trip unchanged.
     """
 
     team_id: str
     year: int
     display_name: str
+    league: Optional[str] = None
+    division: Optional[str] = None
 
     @property
     def key(self) -> str:
@@ -42,6 +49,8 @@ class LeagueTeam:
             "team_id": self.team_id,
             "year": self.year,
             "display_name": self.display_name,
+            "league": self.league,
+            "division": self.division,
         }
 
     @classmethod
@@ -50,6 +59,8 @@ class LeagueTeam:
             team_id=data["team_id"],
             year=data["year"],
             display_name=data["display_name"],
+            league=data.get("league"),
+            division=data.get("division"),
         )
 
 
@@ -155,16 +166,19 @@ def _reject_duplicate_teams(teams: List[LeagueTeam]) -> None:
 
 @dataclass
 class SeasonState:
-    """A round-robin season: league config, schedule, and results.
+    """A season: league config, schedule, and results.
 
-    The schedule is stored (explicit beats re-derived) but can be regenerated
-    from ``teams`` order + ``games_per_opponent``; :meth:`create` does exactly
-    that. Standings, the current day, completion, and the champion are all
-    derived from ``results``.
+    A **round-robin** season's schedule can be regenerated from ``teams`` order
+    + ``games_per_opponent`` (:meth:`create` does exactly that). A
+    **historical** season carries a prebuilt, non-round-robin schedule and
+    ``games_per_opponent = None`` (:meth:`from_schedule`); the field is
+    round-robin-only. Either way the schedule is stored (explicit beats
+    re-derived), and standings, the current day, completion, and the champion
+    are all derived from ``results``.
     """
 
     teams: List[LeagueTeam]
-    games_per_opponent: int
+    games_per_opponent: Optional[int]
     schedule: List[SeasonDay]
     user_team_key: Optional[str] = None
     results: List[SeasonGameRecord] = field(default_factory=list)
@@ -197,6 +211,32 @@ class SeasonState:
         return cls(
             teams=list(teams),
             games_per_opponent=games_per_opponent,
+            schedule=schedule,
+            user_team_key=user_team_key,
+        )
+
+    @classmethod
+    def from_schedule(
+        cls,
+        teams: List[LeagueTeam],
+        schedule: List[SeasonDay],
+        user_team_key: Optional[str] = None,
+    ) -> "SeasonState":
+        """Build a season from a prebuilt (non-round-robin) schedule.
+
+        Used by the historical-season builder: the schedule is already grouped
+        into :class:`SeasonDay`s (``day == list index``, matching the
+        round-robin invariant), so there is nothing to generate.
+        ``games_per_opponent`` is ``None`` (round-robin-only). The dataclass'
+        ``__post_init__`` still runs — duplicate teams and an unknown
+        ``user_team_key`` are rejected here exactly as for a round-robin season
+        — but the round-robin size/games-count checks in
+        :func:`generate_schedule` are deliberately skipped (a historical league
+        is 16–30 teams on an irregular slate).
+        """
+        return cls(
+            teams=list(teams),
+            games_per_opponent=None,
             schedule=schedule,
             user_team_key=user_team_key,
         )

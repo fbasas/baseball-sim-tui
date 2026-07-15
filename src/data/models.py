@@ -99,6 +99,7 @@ class TeamSeason:
     park_factor_batting: int = 100  # BPF from Teams table
     park_factor_pitching: int = 100  # PPF from Teams table
     games: int = 0  # G from Teams table (season length actually played)
+    division: str = ""  # divID from Teams table ("" before 1969)
 
 
 @dataclass
