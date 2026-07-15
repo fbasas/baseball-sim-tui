@@ -2,9 +2,9 @@
 
 The historical-mode analogue of :class:`~src.tui.season_setup_flow.SeasonSetupFlow`.
 Reached from the ``"historical"`` entry in ``SetupFlow``'s mode menu, it drives a
-year-based modal chain — pick a year, build that year's full league on its actual
-Retrosheet schedule, pick the team to manage (or watch as commissioner) — then
-makes every league team AI-playable and hands a fully constructed
+year-based modal chain — pick a year, choose the actual or a generated schedule,
+build that year's full league, pick the team to manage (or watch as commissioner)
+— then makes every league team AI-playable and hands a fully constructed
 :class:`~src.season.controller.SeasonController` back to its owner (the app pushes
 the season hub through the *existing* ``_on_season_ready`` path, exactly as the
 round-robin season flow does).
@@ -16,23 +16,30 @@ The new work here is only the setup chain:
 1. **Year picker** — a ``ChoiceScreen`` over years the local database can build a
    season for: ``get_available_years()`` intersected with ``has_schedule(year)``.
    Backing out returns to the mode menu.
-2. **League build** — :func:`~src.season.historical.build_historical_season`
-   resolves the year's teams (Retrosheet → Lahman) and its day-by-day schedule.
-   A build failure (unresolved/unloadable teams) or a team-object load failure is
-   reported by name and returns to the year picker — a faithful league loads
-   cleanly for supported years (season mode's blocking precedent).
-3. **Your team** — a ``ChoiceScreen`` over every league team (labelled
+2. **Schedule type** — a ``ChoiceScreen`` toggle: **Actual schedule** (the year's
+   real Retrosheet calendar) vs **Generated schedule** (the same league and
+   matchup multiset re-ordered into a fresh day sequence). Backing out returns to
+   the year picker. The choice only selects the builder — everything after is
+   shared between the two.
+3. **League build** — the chosen builder
+   (:func:`~src.season.historical.build_historical_season` or
+   :func:`~src.season.historical.build_generated_historical_season`, drop-in same
+   signature) resolves the year's teams (Retrosheet → Lahman) and its day-by-day
+   schedule. A build failure (unresolved/unloadable teams) or a team-object load
+   failure is reported by name and returns to the year picker — a faithful league
+   loads cleanly for supported years (season mode's blocking precedent).
+4. **Your team** — a ``ChoiceScreen`` over every league team (labelled
    ``"{year} {team_name}"``) plus **"Watch-only (commissioner)"``
    (``user_team_key=None``). Backing out returns to the year picker.
-4. **Role-card pass** — the shared :class:`~src.tui.role_card_pass.RoleCardPass`
+5. **Role-card pass** — the shared :class:`~src.tui.role_card_pass.RoleCardPass`
    builds any missing ``data/roles/<TEAMID>-<YEAR>.json`` for all league teams
    (up to 30). A team whose card can't be built blocks the season, named.
-5. **Launch** — build each team's manager context (cards now all present) and
+6. **Launch** — build each team's manager context (cards now all present) and
    hand the ``SeasonController`` to ``on_complete``.
 
-Team objects and the built ``SeasonState`` are loaded once at step 2 and reused
-for the controller, so the league is validated end-to-end before the user picks a
-team (no late failure after the your-team choice).
+Team objects and the built ``SeasonState`` are loaded once at the build step and
+reused for the controller, so the league is validated end-to-end before the user
+picks a team (no late failure after the your-team choice).
 """
 
 from pathlib import Path
@@ -45,7 +52,11 @@ from src.game.manager_adapter import (
 )
 from src.game.team import Team
 from src.season.controller import SeasonController
-from src.season.historical import HistoricalSeasonError, build_historical_season
+from src.season.historical import (
+    HistoricalSeasonError,
+    build_generated_historical_season,
+    build_historical_season,
+)
 from src.season.state import SeasonState
 
 from .role_card_pass import RoleCardPass
@@ -142,7 +153,7 @@ class HistoricalSeasonSetupFlow:
                 # Backing out of the first step returns to the mode menu.
                 self._on_cancel()
                 return
-            self._build_league(int(choice_id))
+            self._select_schedule_type(int(choice_id))
 
         self._app.push_screen(
             ChoiceScreen(
@@ -154,19 +165,60 @@ class HistoricalSeasonSetupFlow:
             on_chosen,
         )
 
+    # --- Schedule type ------------------------------------------------------
+
+    def _select_schedule_type(self, year: int) -> None:
+        """Choose the year's actual schedule or a freshly generated one.
+
+        A ``ChoiceScreen`` toggle between the real Retrosheet calendar and a
+        generated season (same league, same matchup multiset, re-ordered into a
+        fresh day sequence — see
+        :func:`~src.season.historical.build_generated_historical_season`). The
+        choice only selects the builder; the league build and everything after
+        are shared. Backing out returns to the year picker.
+        """
+
+        def on_chosen(choice_id: Optional[str]) -> None:
+            if choice_id is None:
+                self._select_year()  # back
+                return
+            self._build_league(year, generated=(choice_id == "generated"))
+
+        self._app.push_screen(
+            ChoiceScreen(
+                title="⚾ SCHEDULE",
+                prompt="Play the season's actual schedule, or a generated one?",
+                choices=[
+                    ("actual", "Actual schedule"),
+                    ("generated", "Generated schedule"),
+                ],
+                default_id="actual",
+            ),
+            on_chosen,
+        )
+
     # --- League build -------------------------------------------------------
 
-    def _build_league(self, year: int) -> None:
+    def _build_league(self, year: int, generated: bool = False) -> None:
         """Resolve the year's full league + schedule, then pick the user's team.
 
-        Builds the historical ``SeasonState`` (no user team yet) and loads a
-        ``Team`` object for every league team, so the whole league is validated
-        before the your-team pick. A build failure (unresolved/unloadable teams)
-        or a team-object load failure is reported by name and returns to the year
-        picker — a faithful league loads cleanly for supported years.
+        Builds the ``SeasonState`` (no user team yet) with the schedule variant
+        chosen at the toggle — the actual Retrosheet calendar
+        (:func:`~src.season.historical.build_historical_season`) or a generated
+        re-ordering (:func:`~src.season.historical.build_generated_historical_season`,
+        drop-in same signature) — and loads a ``Team`` object for every league
+        team, so the whole league is validated before the your-team pick. A build
+        failure (unresolved/unloadable teams) or a team-object load failure is
+        reported by name and returns to the year picker — a faithful league loads
+        cleanly for supported years.
         """
+        build = (
+            build_generated_historical_season
+            if generated
+            else build_historical_season
+        )
         try:
-            state = build_historical_season(self._repo, year)
+            state = build(self._repo, year)
         except HistoricalSeasonError as exc:
             self._app.notify(
                 f"Couldn't build the {year} season: "

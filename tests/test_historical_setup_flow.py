@@ -1,18 +1,21 @@
-"""Unit tests for the historical-season setup flow (FRE-119).
+"""Unit tests for the historical-season setup flow (FRE-119, FRE-141).
 
 DB-free and Pilot-free, in the house callback-driven idiom (mirrors
 ``test_season_setup_flow``): a fake app records each ``push_screen(screen,
 callback)`` so the test can inspect the pushed screen and invoke the callback
-with the value a real screen would dismiss. The league builder
-(``build_historical_season``, tested in ``test_season_historical``) and team
-loads are monkeypatched; role cards are written into a tmp dir.
+with the value a real screen would dismiss. The league builders
+(``build_historical_season`` / ``build_generated_historical_season``, tested in
+``test_season_historical`` / ``test_season_generated_schedule``) and team loads
+are monkeypatched; role cards are written into a tmp dir.
 
-Coverage (the Part-4 DoD):
+Coverage (the Part-4 + Part-5 DoD):
 
 - the year picker offers only years with both roster and schedule data
   (``get_available_years`` ∩ ``has_schedule``), and no such year returns to the
   mode menu;
 - backing out of the year picker returns to the mode menu (``on_cancel``);
+- the schedule-type toggle offers actual + generated and dispatches to the
+  matching builder; backing out of it returns to the year picker (FRE-141);
 - a league-build failure or a team-load failure names the teams and returns to
   the year picker;
 - the your-team screen lists every league team (``"{year} {name}"``) plus
@@ -113,12 +116,45 @@ def _install_team_loader(monkeypatch, raise_for=()):
 
 
 def _install_builder(monkeypatch, state=None, raises=None):
+    """Patch both schedule builders with the same fake.
+
+    Actual and generated share every downstream step, so a single fake stands in
+    for either; tests that only exercise one branch stay agnostic to which.
+    """
+
     def fake_build(repo, year, user_team_key=None):
         if raises is not None:
             raise raises
         return state if state is not None else _fake_state()
 
     monkeypatch.setattr(historical_flow_module, "build_historical_season", fake_build)
+    monkeypatch.setattr(
+        historical_flow_module, "build_generated_historical_season", fake_build
+    )
+
+
+def _install_recording_builders(monkeypatch):
+    """Patch both builders to record which one the flow dispatched to.
+
+    Returns the list of builder tags (``"actual"`` / ``"generated"``) appended
+    in call order, so a dispatch test can assert the toggle chose correctly.
+    """
+    calls = []
+
+    def make(tag):
+        def fake_build(repo, year, user_team_key=None):
+            calls.append(tag)
+            return _fake_state()
+
+        return fake_build
+
+    monkeypatch.setattr(
+        historical_flow_module, "build_historical_season", make("actual")
+    )
+    monkeypatch.setattr(
+        historical_flow_module, "build_generated_historical_season", make("generated")
+    )
+    return calls
 
 
 def _write_card(roles_dir, team_id, year):
@@ -174,6 +210,82 @@ def test_back_at_year_picker_returns_to_mode_menu(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Schedule-type toggle (FRE-141)
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_toggle_offers_actual_and_generated(monkeypatch, tmp_path):
+    _install_team_loader(monkeypatch)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    flow.begin()
+    app.last_callback(str(YEAR))  # pick a year -> schedule toggle
+
+    assert isinstance(app.last_screen, ChoiceScreen)
+    assert app.last_screen._title == "⚾ SCHEDULE"
+    choices = app.last_screen._choices
+    assert [cid for cid, _label in choices] == ["actual", "generated"]
+    labels = dict(choices)
+    assert labels["actual"] == "Actual schedule"
+    assert labels["generated"] == "Generated schedule"
+
+
+def test_back_from_schedule_toggle_reprompts_year(monkeypatch, tmp_path):
+    _install_team_loader(monkeypatch)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    flow.begin()
+    app.last_callback(str(YEAR))
+    assert app.last_screen._title == "⚾ SCHEDULE"
+    app.last_callback(None)  # back
+
+    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    assert "controller" not in captured
+    assert "cancel" not in captured
+
+
+def test_actual_toggle_dispatches_to_actual_builder(monkeypatch, tmp_path):
+    calls = _install_recording_builders(monkeypatch)
+    _install_team_loader(monkeypatch)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    _drive_to_your_team(app, flow, schedule="actual")
+
+    assert calls == ["actual"]
+    # Landed on the your-team pick (the shared downstream), not an error.
+    assert app.last_screen._title == "⚾ YOUR TEAM"
+
+
+def test_generated_toggle_dispatches_to_generated_builder(monkeypatch, tmp_path):
+    calls = _install_recording_builders(monkeypatch)
+    _install_team_loader(monkeypatch)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    _drive_to_your_team(app, flow, schedule="generated")
+
+    assert calls == ["generated"]
+    assert app.last_screen._title == "⚾ YOUR TEAM"
+
+
+def test_generated_toggle_starts_season_end_to_end(monkeypatch, tmp_path):
+    """Generated branch reaches a launched controller (shared downstream reuse)."""
+    _install_builder(monkeypatch)  # both builders -> the fake grouped state
+    _install_team_loader(monkeypatch)
+    for t in _LEAGUE:
+        _write_card(tmp_path, t.team_id, t.year)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    _drive_to_your_team(app, flow, schedule="generated")
+    app.last_callback("TA-1927")
+
+    controller = captured["controller"]
+    assert [t.key for t in controller.state.teams] == _KEYS
+    assert controller.state.user_team_key == "TA-1927"
+    assert controller.state.is_grouped
+    assert "cancel" not in captured
+
+
+# ---------------------------------------------------------------------------
 # League build failures -> back to the year picker
 # ---------------------------------------------------------------------------
 
@@ -187,6 +299,7 @@ def test_build_failure_names_teams_and_reprompts_year(monkeypatch, tmp_path):
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
     app.last_callback(str(YEAR))
+    app.last_callback("actual")
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "rX (unresolved Retrosheet id)" in error_notes[-1]
@@ -203,6 +316,7 @@ def test_team_load_failure_names_team_and_reprompts_year(monkeypatch, tmp_path):
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
     app.last_callback(str(YEAR))
+    app.last_callback("actual")
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "1927 TC Club" in error_notes[-1]
@@ -215,9 +329,11 @@ def test_team_load_failure_names_team_and_reprompts_year(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _drive_to_your_team(app, flow):
+def _drive_to_your_team(app, flow, schedule="actual"):
+    """Drive begin → year → schedule-type toggle, landing on the your-team pick."""
     flow.begin()
     app.last_callback(str(YEAR))
+    app.last_callback(schedule)
 
 
 def test_your_team_lists_all_teams_and_watch_only(monkeypatch, tmp_path):
