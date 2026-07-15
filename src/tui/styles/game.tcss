@@ -107,14 +107,14 @@ GameScreen.-narrow {
 /* Season hub + league leaders: full screens (they inherit App CSS_PATH),
    styled like BoxScoreScreen — a centered scrolling document of bordered
    panels over the night-game background. */
-SeasonHubScreen, LeagueLeadersScreen {
+SeasonHubScreen, LeagueLeadersScreen, TeamStatsScreen {
     layout: vertical;
     background: #0d160d;
     color: #f2ecd8;
     align-horizontal: center;
 }
 
-#hub-container, #leaders-container {
+#hub-container, #leaders-container, #team-stats-container {
     width: 100%;
     max-width: 100;
     /* 1fr (not auto) bounds the viewport so the keyboard can scroll it. */
@@ -125,12 +125,12 @@ SeasonHubScreen, LeagueLeadersScreen {
     scrollbar-size-vertical: 1;
 }
 
-#hub-container:focus, #leaders-container:focus {
+#hub-container:focus, #leaders-container:focus, #team-stats-container:focus {
     /* No focus border — these read as documents, not controls. */
     border: none;
 }
 
-#hub-day-header, #leaders-title {
+#hub-day-header, #leaders-title, #team-stats-title {
     text-align: center;
     width: 100%;
     color: #d4a843;
@@ -138,7 +138,7 @@ SeasonHubScreen, LeagueLeadersScreen {
     margin: 1 0 0 0;
 }
 
-#hub-champion {
+#hub-champion, #team-stats-team {
     text-align: center;
     width: 100%;
     margin: 0 0 1 0;

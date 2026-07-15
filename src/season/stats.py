@@ -122,6 +122,20 @@ class SeasonStats:
     def _games(self, team_key: str) -> int:
         return self.games_played.get(team_key, 0)
 
+    # --- Per-team read accessors --------------------------------------------
+
+    def team_batting(self, team_key: str) -> Dict[str, Dict[str, int]]:
+        """This team's batting lines as ``player_id -> line`` (``{}`` if none yet).
+
+        Returns the live inner dict (callers only read it) so a per-team stat
+        page can render every batter without reaching into ``.batting`` directly.
+        """
+        return self.batting.get(team_key, {})
+
+    def team_pitching(self, team_key: str) -> Dict[str, Dict[str, int]]:
+        """This team's pitching lines as ``player_id -> line`` (``{}`` if none yet)."""
+        return self.pitching.get(team_key, {})
+
     def batting_average_leaders(self, limit: Optional[int] = None) -> List[LeaderRow]:
         """AVG (H/AB) leaders, qualified at AB >= 2 * that team's games played."""
         def qualifies(team_key: str, line: Dict[str, int]) -> bool:

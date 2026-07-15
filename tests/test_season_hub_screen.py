@@ -33,6 +33,7 @@ from src.tui.screens.season_hub_screen import (
     _format_pct,
     _resolve_name,
 )
+from src.tui.screens.team_stats_screen import TeamStatsScreen
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +559,48 @@ def test_leaders_action_pushes_leaders_screen_not_owner_callback():
     assert len(pushed) == 1
     assert isinstance(pushed[0], LeagueLeadersScreen)
     assert pushed[0]._controller is controller
+
+
+def _team_stats_mock(controller):
+    pushed = []
+    mock = SimpleNamespace(
+        _controller=controller,
+        app=SimpleNamespace(push_screen=lambda screen: pushed.append(screen)),
+    )
+    return mock, pushed
+
+
+def test_team_stats_action_opens_on_user_team():
+    controller = _controller(_make_state(user_key="NYA-1927"))
+    mock, pushed = _team_stats_mock(controller)
+
+    SeasonHubScreen.action_team_stats(mock)
+
+    assert len(pushed) == 1
+    screen = pushed[0]
+    assert isinstance(screen, TeamStatsScreen)
+    assert screen._controller is controller
+    # Opens on the user's team.
+    assert screen._current_key() == "NYA-1927"
+
+
+def test_team_stats_action_opens_on_leader_when_watch_only():
+    state = _make_state(user_key=None)
+    controller = _controller(state)
+    mock, pushed = _team_stats_mock(controller)
+
+    SeasonHubScreen.action_team_stats(mock)
+
+    # No user team -> the standings leader is the initial team.
+    assert pushed[0]._current_key() == state.standings[0].key
+
+
+def test_team_stats_action_always_available():
+    # Mid-season and at season end alike (reviewing final team stats is natural).
+    active = _gate_mock(_make_state())
+    complete = _gate_mock(_complete_state())
+    assert SeasonHubScreen.check_action(active, "team_stats", ()) is True
+    assert SeasonHubScreen.check_action(complete, "team_stats", ()) is True
 
 
 # ---------------------------------------------------------------------------
