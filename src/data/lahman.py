@@ -318,7 +318,7 @@ class LahmanRepository:
         """
         cursor = self.conn.execute(
             """
-            SELECT yearID, lgID, teamID, name, BPF, PPF, G
+            SELECT yearID, lgID, teamID, name, BPF, PPF, G, divID
             FROM Teams
             WHERE teamID = ? AND yearID = ?
             """,
@@ -334,6 +334,7 @@ class LahmanRepository:
                 park_factor_batting=int(row["BPF"] or 100),
                 park_factor_pitching=int(row["PPF"] or 100),
                 games=int(row["G"] or 0),
+                division=row["divID"] or "",
             )
         return None
 
