@@ -129,6 +129,12 @@ class HistoricalSeasonSetupFlow:
         self._state: Optional[SeasonState] = None
         self._loaded_teams: Dict[str, Team] = {}
         self._user_team_key: Optional[str] = None
+        # The most recent failure message, rendered as a persistent inline line
+        # on the year picker so the reason the last pick failed survives (every
+        # failure path sets it just before returning to ``_select_year``; a
+        # successful build past the loaded-teams check clears it). Generalizes
+        # FRE-155's unresolved-id notice to all six failure sites (FRE-161).
+        self._last_error: Optional[str] = None
 
     def begin(self) -> None:
         """Start the flow at year selection."""
@@ -152,20 +158,20 @@ class HistoricalSeasonSetupFlow:
             if schedule_available_for(year)
         ]
 
-    def _select_year(self, notice: Optional[str] = None) -> None:
+    def _select_year(self) -> None:
         """Offer the buildable years; backing out returns to the mode menu.
 
         With no buildable year (no Lahman roster in Retrosheet's coverage range)
         the flow reports it and returns to the mode menu rather than showing an
         empty picker.
 
-        Args:
-            notice: An optional **persistent** message rendered on the picker
-                (an inline error line that does not auto-dismiss). ``_build_league``
-                passes the actionable "rebuild the database" text here for the
-                unresolved-Retrosheet-id failure, so the reason stays visible on
-                the picker the user lands back on instead of vanishing with a
-                toast. ``None`` (the default) shows the picker unadorned.
+        The current ``self._last_error`` (if any) is threaded to the screen's
+        ``notice`` seam as a **persistent**, error-styled inline line that does
+        not auto-dismiss — so whatever failed on the previous pick stays visible
+        on the picker the user lands back on, instead of vanishing with a toast.
+        A ``{year: bool}`` cached map (``repo.has_schedule`` per buildable year)
+        is threaded to the screen's ``cached`` seam so each year is marked
+        already-cached vs. needs-a-network-fetch (FRE-161).
         """
         years = self._available_years()
         if not years:
@@ -180,6 +186,11 @@ class HistoricalSeasonSetupFlow:
             self._on_cancel()
             return
 
+        # One cheap ``has_schedule`` per buildable year (the same check the
+        # fetch-if-missing gate does): cached years pick offline-instantly,
+        # uncached ones fetch on pick — surfaced as a per-year marker.
+        cached = {year: self._repo.has_schedule(year) for year in years}
+
         def on_chosen(choice: Optional[int]) -> None:
             if choice is None:
                 # Backing out of the first step returns to the mode menu.
@@ -188,7 +199,12 @@ class HistoricalSeasonSetupFlow:
             self._fetch_schedule_if_missing(choice)
 
         self._app.push_screen(
-            HistoricalYearSelectScreen(years, default_year=years[0], notice=notice),
+            HistoricalYearSelectScreen(
+                years,
+                default_year=years[0],
+                notice=self._last_error,
+                cached=cached,
+            ),
             on_chosen,
         )
 
@@ -206,14 +222,26 @@ class HistoricalSeasonSetupFlow:
 
         Every failure — no network, a 404 / not-a-ZIP / no schedule member /
         zero rows, or any other error escaping the worker — is reported by name
-        by the pass and returns to the year picker (``_select_year``), never a
-        crash or a hung toast.
+        by the pass and returns to the year picker (``_on_fetch_failure`` →
+        ``_select_year``), never a crash or a hung toast. The pass passes its
+        composed failure text through ``on_failure(message)`` so it also lands on
+        the picker's persistent last-failure line, not only the toast (FRE-161).
         """
         ScheduleIngest(self._app, self._repo).run(
             year,
             on_success=lambda: self._select_schedule_type(year),
-            on_failure=self._select_year,
+            on_failure=self._on_fetch_failure,
         )
+
+    def _on_fetch_failure(self, message: Optional[str] = None) -> None:
+        """Record a fetch failure and return to the year picker.
+
+        Stores the schedule-fetch pass's composed message as ``self._last_error``
+        so it renders on the picker's persistent inline line, then re-enters
+        ``_select_year`` (the pass already surfaced the transient toast).
+        """
+        self._last_error = message
+        self._select_year()
 
     # --- Schedule type ------------------------------------------------------
 
@@ -262,12 +290,13 @@ class HistoricalSeasonSetupFlow:
         reported by name and returns to the year picker — a faithful league loads
         cleanly for supported years.
 
-        The **unresolved-Retrosheet-id** sub-case is special-cased (FRE-155):
-        instead of a 12-second toast that vanishes, the picker is re-shown with a
-        persistent, actionable notice naming the rebuild command, because that
-        failure means a stale/incomplete database the user can fix. The other
-        sub-cases (empty roster / no team record / team-object load failure) keep
-        the existing toast.
+        Every failure sets ``self._last_error`` just before returning to
+        ``_select_year``, so its message renders on the picker's persistent
+        inline line (FRE-161 generalizes FRE-155's unresolved-id notice to all
+        the failure sites). The **unresolved-Retrosheet-id** sub-case keeps its
+        actionable, rebuild-command message (FRE-155) and is surfaced *only* on
+        the persistent line (no toast); the other sub-cases (empty roster / no
+        team record / team-object load failure) also keep their existing toast.
         """
         build = (
             build_generated_historical_season
@@ -283,12 +312,16 @@ class HistoricalSeasonSetupFlow:
                 # team. Return to the picker with a persistent, actionable
                 # message (naming the rebuild command) instead of a 12s toast
                 # that vanishes and strands the user (FRE-155).
-                self._select_year(notice=notice)
+                self._last_error = notice
+                self._select_year()
                 return
-            self._app.notify(
+            self._last_error = (
                 f"Couldn't build the {year} season: "
                 f"{len(exc.problem_teams)} team(s) could not be loaded — "
-                f"{', '.join(exc.problem_teams)}.",
+                f"{', '.join(exc.problem_teams)}."
+            )
+            self._app.notify(
+                self._last_error,
                 title="Historical season failed",
                 severity="error",
                 timeout=12,
@@ -298,8 +331,9 @@ class HistoricalSeasonSetupFlow:
         except ValueError as exc:
             # No schedule rows / none played — shouldn't happen for an offered
             # year, but report it rather than crashing.
+            self._last_error = str(exc)
             self._app.notify(
-                str(exc),
+                self._last_error,
                 title="Historical season failed",
                 severity="error",
                 timeout=12,
@@ -317,9 +351,12 @@ class HistoricalSeasonSetupFlow:
             except Exception:  # noqa: BLE001 - a sparse/broken team blocks, named
                 failures.append(self._team_label(year, team.display_name))
         if failures:
-            self._app.notify(
+            self._last_error = (
                 f"Couldn't load {len(failures)} team(s) for the {year} season: "
-                f"{', '.join(failures)}. Season not started.",
+                f"{', '.join(failures)}. Season not started."
+            )
+            self._app.notify(
+                self._last_error,
                 title="Historical season failed",
                 severity="error",
                 timeout=12,
@@ -327,6 +364,10 @@ class HistoricalSeasonSetupFlow:
             self._select_year()
             return
 
+        # The league built and every team loaded: clear the persistent failure
+        # line so a subsequent back-out to the picker isn't haunted by a stale
+        # error from an earlier failed pick (FRE-161).
+        self._last_error = None
         self._year = year
         self._state = state
         self._loaded_teams = loaded

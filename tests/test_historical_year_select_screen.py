@@ -66,8 +66,12 @@ class _FakeOptionList:
     def ids(self):
         return [opt.id for opt in self._options]
 
+    @property
+    def prompts(self):
+        return [str(opt.prompt) for opt in self._options]
 
-def _mock_screen(years=_YEARS, default_year=None):
+
+def _mock_screen(years=_YEARS, default_year=None, cached=None):
     """A mock-``self`` for the phase/selection handlers.
 
     Returns ``(mock, state)`` where ``state`` collects side effects: the fake
@@ -84,6 +88,7 @@ def _mock_screen(years=_YEARS, default_year=None):
     mock = SimpleNamespace(
         _years=list(years),
         _default_year=default_year,
+        _cached=dict(cached or {}),
         _decades=sorted({y // 10 * 10 for y in years}, reverse=True),
         _phase="decade",
         _chosen_decade=None,
@@ -94,6 +99,7 @@ def _mock_screen(years=_YEARS, default_year=None):
     mock.dismiss = lambda result=None: state.dismissed.append(result)
     # Real methods under test, bound to the mock self.
     mock._breadcrumb = lambda: cls._breadcrumb(mock)
+    mock._year_prompt = lambda year: cls._year_prompt(mock, year)
     mock._default_decade = lambda: cls._default_decade(mock)
     mock._enter_decade_phase = lambda: cls._enter_decade_phase(mock)
     mock._enter_year_phase = lambda decade: cls._enter_year_phase(mock, decade)
@@ -237,6 +243,58 @@ def test_confirm_on_a_decade_advances_rather_than_dismisses():
     assert mock._phase == "year"
     assert mock._chosen_decade == 1920
     assert state.dismissed == []
+
+
+# ---------------------------------------------------------------------------
+# Cached-vs-fetch annotation (FRE-161)
+# ---------------------------------------------------------------------------
+
+
+def test_cached_defaults_empty_and_year_prompts_bare():
+    # No cached map -> every year renders bare (the unannotated picker is
+    # unchanged), and the stored map is empty.
+    screen = HistoricalYearSelectScreen(_YEARS)
+    assert screen._cached == {}
+    assert screen._year_prompt(1927) == "1927"
+
+
+def test_cached_stored_when_given():
+    screen = HistoricalYearSelectScreen(_YEARS, cached={1927: True, 1906: False})
+    assert screen._cached == {1927: True, 1906: False}
+
+
+def test_year_prompt_marks_cached_vs_fetch():
+    screen = HistoricalYearSelectScreen(_YEARS, cached={1927: True, 1906: False})
+    cached_prompt = screen._year_prompt(1927)
+    fetch_prompt = screen._year_prompt(1906)
+    # Both keep the year and carry a legible, distinct marker.
+    assert cached_prompt.startswith("1927")
+    assert "cached" in cached_prompt and "●" in cached_prompt
+    assert fetch_prompt.startswith("1906")
+    assert "fetch" in fetch_prompt and "↓" in fetch_prompt
+    # A year absent from the map (even with a non-empty map) renders bare.
+    assert screen._year_prompt(1999) == "1999"
+
+
+def test_year_phase_options_render_cached_markers():
+    # The markers reach the actual year-phase OptionList prompts (mock-self).
+    mock, state = _mock_screen(cached={1927: True, 1925: False})
+    mock._enter_year_phase(1920)  # years 1927, 1925
+
+    # ids are unchanged (routing still keys off "year:{year}")...
+    assert state.option_list.ids == ["year:1927", "year:1925"]
+    # ...and the prompts carry the annotation.
+    prompts = state.option_list.prompts
+    assert prompts[0].startswith("1927") and "cached" in prompts[0]
+    assert prompts[1].startswith("1925") and "fetch" in prompts[1]
+
+
+def test_decade_phase_rows_are_unannotated():
+    # Decade-phase rows never carry the cached/fetch marker (year-phase only).
+    mock, state = _mock_screen(cached={1927: True, 1925: False})
+    mock._enter_decade_phase()
+
+    assert state.option_list.prompts == ["2010s", "1990s", "1920s", "1900s"]
 
 
 # ---------------------------------------------------------------------------

@@ -60,13 +60,13 @@ class ScheduleIngest:
         self._fetch_rows = fetch_rows if fetch_rows is not None else fetch_schedule_rows
         self._year: int = 0
         self._on_success: Callable[[], None] = lambda: None
-        self._on_failure: Callable[[], None] = lambda: None
+        self._on_failure: Callable[[Optional[str]], None] = lambda message=None: None
 
     def run(
         self,
         year: int,
         on_success: Callable[[], None],
-        on_failure: Callable[[], None],
+        on_failure: Callable[[Optional[str]], None],
     ) -> None:
         """Ensure the year's schedule is cached, then dispatch a continuation.
 
@@ -79,8 +79,10 @@ class ScheduleIngest:
         self-heals (FRE-147). Otherwise the network + parse runs on a background
         Textual worker; back on the main thread the rows are written via
         ``repo.ingest_schedule`` and ``on_success`` continues the flow. Any
-        failure calls ``on_failure`` after a named notify (the caller returns to
-        the year picker).
+        failure calls ``on_failure(message)`` after a named notify — passing the
+        same composed failure text so the caller can render it as the picker's
+        persistent last-failure line (FRE-161), not just the transient toast
+        (the caller returns to the year picker).
         """
         self._year = year
         self._on_success = on_success
@@ -144,24 +146,28 @@ class ScheduleIngest:
 
     def _fail_network(self) -> None:
         """No network / host unreachable / timeout — named, back to picker."""
-        self._app.notify(
+        text = (
             f"Couldn't reach Retrosheet to fetch the {self._year} schedule. "
-            "Check your connection and try again.",
+            "Check your connection and try again."
+        )
+        self._app.notify(
+            text,
             title="Historical season unavailable",
             severity="error",
             timeout=12,
         )
-        self._on_failure()
+        self._on_failure(text)
 
     def _fail_unavailable(self) -> None:
         """Year not published / not a ZIP / no rows — named, back to picker."""
+        text = f"No schedule is available for {self._year}."
         self._app.notify(
-            f"No schedule is available for {self._year}.",
+            text,
             title="Historical season unavailable",
             severity="error",
             timeout=12,
         )
-        self._on_failure()
+        self._on_failure(text)
 
     def _fail_other(self, message: str) -> None:
         """Any other error escaping the worker — named, back to picker.
@@ -170,10 +176,11 @@ class ScheduleIngest:
         — e.g. a DB write I/O error — is reported instead of leaving the flow
         hung on the "Fetching…" toast.
         """
+        text = f"Couldn't fetch the {self._year} schedule: {message}."
         self._app.notify(
-            f"Couldn't fetch the {self._year} schedule: {message}.",
+            text,
             title="Historical season unavailable",
             severity="error",
             timeout=12,
         )
-        self._on_failure()
+        self._on_failure(text)

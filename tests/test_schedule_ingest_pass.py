@@ -90,12 +90,19 @@ class FakeRepo:
 
 
 def _run(app, repo, year, fetch_rows=None):
-    """Run the pass, returning the ``{success|failure}`` outcome captured."""
+    """Run the pass, returning the ``{success|failure}`` outcome captured.
+
+    ``on_failure`` records the composed message the pass now threads through
+    (FRE-161) as ``failure_message``, so tests can assert the persistent
+    last-failure line gets the same text as the toast.
+    """
     captured = {}
     ScheduleIngest(app, repo, fetch_rows=fetch_rows).run(
         year,
         on_success=lambda: captured.update(success=True),
-        on_failure=lambda: captured.update(failure=True),
+        on_failure=lambda message=None: captured.update(
+            failure=True, failure_message=message
+        ),
     )
     return captured
 
@@ -274,7 +281,10 @@ def test_network_failure_is_named_and_returns_to_picker(exc):
 
     captured = _run(app, repo, 1927, fetch_rows=fetch_rows)
 
-    assert captured == {"failure": True}
+    assert captured["failure"] is True and "success" not in captured
+    # FRE-161: the composed message is threaded to on_failure verbatim (same
+    # text the toast showed) so the flow can render it on the persistent line.
+    assert captured["failure_message"] == app.error_notes[-1]
     assert repo.ingested == []
     assert app.error_notes
     assert "Couldn't reach Retrosheet" in app.error_notes[-1]
@@ -290,7 +300,10 @@ def test_unavailable_year_valueerror_is_named_and_returns_to_picker():
 
     captured = _run(app, repo, 1876, fetch_rows=fetch_rows)
 
-    assert captured == {"failure": True}
+    assert captured["failure"] is True and "success" not in captured
+    # FRE-161: the composed message is threaded to on_failure verbatim (same
+    # text the toast showed) so the flow can render it on the persistent line.
+    assert captured["failure_message"] == app.error_notes[-1]
     assert repo.ingested == []
     assert app.error_notes
     assert app.error_notes[-1] == "No schedule is available for 1876."
@@ -301,7 +314,10 @@ def test_zero_rows_is_treated_as_unavailable():
 
     captured = _run(app, repo, 1927, fetch_rows=lambda year: [])
 
-    assert captured == {"failure": True}
+    assert captured["failure"] is True and "success" not in captured
+    # FRE-161: the composed message is threaded to on_failure verbatim (same
+    # text the toast showed) so the flow can render it on the persistent line.
+    assert captured["failure_message"] == app.error_notes[-1]
     assert repo.ingested == []  # nothing written for an empty schedule
     assert app.error_notes[-1] == "No schedule is available for 1927."
 
@@ -314,7 +330,10 @@ def test_unexpected_error_is_surfaced_and_returns_to_picker():
 
     captured = _run(app, repo, 1927, fetch_rows=fetch_rows)
 
-    assert captured == {"failure": True}
+    assert captured["failure"] is True and "success" not in captured
+    # FRE-161: the composed message is threaded to on_failure verbatim (same
+    # text the toast showed) so the flow can render it on the persistent line.
+    assert captured["failure_message"] == app.error_notes[-1]
     assert app.error_notes
     assert "gremlins" in app.error_notes[-1]
 
@@ -328,7 +347,10 @@ def test_write_error_is_surfaced_not_hung():
 
     captured = _run(app, ExplodingRepo(), 1927, fetch_rows=lambda year: [_row(1927)])
 
-    assert captured == {"failure": True}
+    assert captured["failure"] is True and "success" not in captured
+    # FRE-161: the composed message is threaded to on_failure verbatim (same
+    # text the toast showed) so the flow can render it on the persistent line.
+    assert captured["failure_message"] == app.error_notes[-1]
     assert app.error_notes
     assert "disk full" in app.error_notes[-1]
 

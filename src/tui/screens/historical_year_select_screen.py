@@ -21,7 +21,7 @@ it unit-tests without a database. It returns the chosen ``year`` (an ``int``)
 when a year is picked, or ``None`` if the user backs out of the decade phase.
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -47,10 +47,13 @@ class HistoricalYearSelectScreen(ModalScreen[Optional[int]]):
             unresolved-Retrosheet-id build failure (FRE-155), so the reason stays
             visible on the picker the user lands back on. ``None`` (the default)
             shows the picker unadorned.
-
-    Additional optional keyword params are intentionally left open for a later
-    issue (the per-year cached/fetch annotation, spec § Piece 2 / FRE-161) to add
-    without a constructor break.
+        cached: an optional ``{year: bool}`` map (``repo.has_schedule`` per
+            buildable year) marking each year already-cached (schedule in the
+            local DB — picks offline-instantly) vs. needs-a-network-fetch on
+            pick. The **year-phase** options render a legible marker
+            (``● cached`` / ``↓ fetch``); decade-phase rows are unannotated. A
+            year absent from the map (or ``None``, the default) renders bare, so
+            the picker is unchanged when no annotation is supplied (FRE-161).
     """
 
     CSS = """
@@ -127,12 +130,14 @@ class HistoricalYearSelectScreen(ModalScreen[Optional[int]]):
         years: List[int],
         default_year: Optional[int] = None,
         notice: Optional[str] = None,
+        cached: Optional[Dict[int, bool]] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._years: List[int] = list(years)  # already descending
         self._default_year = default_year
         self._notice = notice
+        self._cached: Dict[int, bool] = dict(cached) if cached else {}
         self._decades: List[int] = sorted(
             {y // 10 * 10 for y in self._years}, reverse=True
         )
@@ -191,7 +196,9 @@ class HistoricalYearSelectScreen(ModalScreen[Optional[int]]):
         option_list.clear_options()
         years_in_decade = [y for y in self._years if y // 10 * 10 == decade]
         for year in years_in_decade:  # already descending
-            option_list.add_option(Option(str(year), id=f"year:{year}"))
+            option_list.add_option(
+                Option(self._year_prompt(year), id=f"year:{year}")
+            )
         # Land on the default year when it lives in this decade, else the top.
         default_index = (
             years_in_decade.index(self._default_year)
@@ -209,6 +216,22 @@ class HistoricalYearSelectScreen(ModalScreen[Optional[int]]):
     def _years_in_decade(self, decade: int) -> List[int]:
         """Years of ``self._years`` in ``decade``, descending (unit-test seam)."""
         return [y for y in self._years if y // 10 * 10 == decade]
+
+    def _year_prompt(self, year: int) -> str:
+        """Year-option label, with the cached/fetch marker when annotated.
+
+        ``● cached`` (in-DB, offline-instant pick) vs. ``↓ fetch`` (needs a
+        network download on pick), driven by the ``cached`` map the flow builds
+        from ``repo.has_schedule``. A year with no entry (or no map at all)
+        renders bare — the unannotated picker is unchanged (FRE-161).
+        """
+        if year not in self._cached:
+            return str(year)
+        if self._cached[year]:
+            # In-DB already: a green dot in the panel's accent, "cached" dimmed.
+            return f"{year}  [#3e5c40]●[/] [dim]cached[/dim]"
+        # Needs a network fetch on pick: a gold down-arrow, "fetch" dimmed.
+        return f"{year}  [#d4a843]↓[/] [dim]fetch[/dim]"
 
     def _default_decade(self) -> int:
         """Index of the default year's decade in the decade list (else 0)."""
