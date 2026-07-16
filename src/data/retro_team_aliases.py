@@ -18,21 +18,37 @@ franchise mappings (below). It is verified collision-free and unambiguous agains
 the same CSV: in no year does a wrong team's ``teamID`` equal a divergent
 Retrosheet id (so exact-match-first is safe), and ``(retro_id, year) → teamID`` is
 a function. See ``docs/specs/retro-lahman-team-join-fix.md`` (§ The alias table).
+``scripts/build_retro_aliases.py`` regenerates this exact table from a
+``teamIDretro``-bearing Lahman source (it reproduces the six entries below
+byte-for-byte from the 2021-max CSV), so the table need not be hand-maintained as
+new seasons land.
 
-``ANA``→``LAA`` is extended through the schedule max year (2026) because the
-Angels remain ``LAA`` in Lahman; the source CSV merely stops at 2021. New 2022+
-divergences (e.g. the Athletics relocation) are intentionally out of scope here —
-that is the follow-up tracked in FRE-156 (blocked on FRE-147).
+``ANA``→``LAA`` is extended through the schedule max year because the Angels remain
+``LAA`` in Lahman; the source CSV merely stops at 2021.
+
+2022–2025 (FRE-156): checked against the real Retrosheet schedule files and
+``CurrentNames.csv``. The only relocations/rebrands are the Guardians (Retrosheet
+keeps ``CLE``, matching Lahman ``CLE`` — no divergence) and the Athletics'
+2024→2025 Oakland→Sacramento move (Retrosheet contemporary id ``OAK``→``ATH``).
+The A's are **not** a new divergence: Lahman's ``teamID`` for this franchise has
+always equalled its ``teamIDretro`` (``PHA``/``KC1``/``OAK``, and ``ATH`` for
+2025), so the schedule id resolves by exact match with no alias row — unlike the
+Angels, whose Lahman ``LAA`` diverges from Retrosheet ``ANA``. Hence no new entries
+for 2022–2025; ``ANA``→``LAA`` (already present) covers the Angels throughout.
 
 Lahman and Retrosheet attribution ships in the project README.
 """
 
 from typing import Dict, Optional, Tuple
 
+from src.data.schedule_ingest import SCHEDULE_MAX_YEAR
+
 # Upper bound for the open-ended ``ANA``→``LAA`` mapping: the schedule max year.
 # The Angels remain Lahman ``LAA`` from 2005 onward, so the alias holds through
-# every schedule year currently supported.
-_ANA_LAA_END_YEAR = 2026
+# every schedule year currently supported. Bound to the schedule coverage so it
+# tracks automatically when ``SCHEDULE_MAX_YEAR`` advances (and matches how
+# ``scripts/build_retro_aliases.py`` extends still-active divergences).
+_ANA_LAA_END_YEAR = SCHEDULE_MAX_YEAR
 
 # Authoritative alias table: Retrosheet id → (Lahman teamID, first_year, last_year),
 # inclusive year range. Derived from Lahman ``Teams.teamIDretro`` (see docstring).
