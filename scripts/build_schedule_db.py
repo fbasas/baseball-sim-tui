@@ -9,30 +9,16 @@ foundation for historical season mode (see
 ``docs/specs/historical-season-mode.md`` and
 ``docs/adr/001-historical-schedule-data.md``).
 
+This script is a thin CLI wrapper: the download/parse/insert core and the
+Retrosheet record layout live in the runtime-importable module
+``src/data/schedule_ingest.py`` (so the app's on-demand-fetch path and this
+script share one implementation). The CLI adds a progress bar, argument
+parsing, and post-build verification on top of that module.
+
 The schedule data is copyrighted by and obtained free of charge from Retrosheet
 (https://www.retrosheet.org/). See the attribution notice in ``README.md``.
 
 Source: https://www.retrosheet.org/schedule/
-
-Record layout (12 comma-separated fields per game; files are quoted CSV and,
-in practice, carry a header row which this script skips):
-
-    1  Date            yyyymmdd
-    2  Game number     0 single · 1 first of DH · 2 second of DH
-    3  Day of week     Sun..Sat
-    4  Visiting team   Retrosheet team id (e.g. NYA)
-    5  Visiting league AL / NL / AA / FL / ...
-    6  Visitor season game number       (not stored)
-    7  Home team       Retrosheet team id
-    8  Home league
-    9  Home season game number          (not stored)
-    10 Time of day     D day · N night · A afternoon · E twilight
-    11 Postponement    non-empty when NOT played as scheduled
-    12 Makeup date     yyyymmdd if the postponed game was replayed (else empty)
-
-The ``Schedules`` table stores every field except the two per-team season game
-numbers, plus a ``year`` column. Re-running for a year clears that year's rows
-first, so builds are idempotent.
 
 Usage:
     python scripts/build_schedule_db.py --year 2016
@@ -47,43 +33,53 @@ Lahman tables).
 """
 
 import argparse
-import csv
-import io
 import sqlite3
 import sys
 import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-# Download timeout in seconds.
-DOWNLOAD_TIMEOUT = 120
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# One ZIP per year. Coverage 1877-2026 (no 1876).
-SCHEDULE_URL = "https://www.retrosheet.org/schedule/{year}SKED.zip"
+from src.data.schedule_ingest import (  # noqa: E402
+    DOWNLOAD_TIMEOUT,
+    SCHEDULE_URL,
+    create_schedule_table,
+    fetch_schedule_rows,
+    ingest_rows,
+    parse_schedule_rows,
+    pick_schedule_member,
+    replace_year,
+)
 
-# Ordered columns stored per schedule row (excludes the two per-team season
-# game-number fields; adds a leading ``year``).
-SCHEDULE_COLUMNS = [
-    ("year", "INTEGER"),
-    ("date", "INTEGER"),
-    ("game_num", "INTEGER"),
-    ("dow", "TEXT"),
-    ("vis_team", "TEXT"),
-    ("vis_league", "TEXT"),
-    ("home_team", "TEXT"),
-    ("home_league", "TEXT"),
-    ("time_of_day", "TEXT"),
-    ("postponed", "TEXT"),
-    ("makeup_date", "INTEGER"),
+__all__ = [
+    # Re-exported from schedule_ingest so callers importing this script keep
+    # working; the canonical home is src/data/schedule_ingest.py.
+    "SCHEDULE_URL",
+    "DOWNLOAD_TIMEOUT",
+    "create_schedule_table",
+    "replace_year",
+    "parse_schedule_rows",
+    "pick_schedule_member",
+    "download_with_progress",
+    "build_year",
+    "resolve_years",
+    "verify_database",
 ]
 
 
 def download_with_progress(
     url: str, desc: str = "Downloading", timeout: int = DOWNLOAD_TIMEOUT
 ) -> bytes:
-    """Download a URL with a simple progress bar, returning the raw bytes."""
+    """Download a URL with a simple progress bar, returning the raw bytes.
+
+    The CLI-only, chatty counterpart of ``schedule_ingest.download_zip``: it
+    prints a progress bar to stdout. The module's fetch stays quiet (a TUI
+    can't render a progress bar). ZIP-magic validation happens downstream in
+    ``schedule_ingest.parse_zip_bytes``.
+    """
     print(f"{desc}: {url}")
     req = urllib.request.Request(
         url,
@@ -112,126 +108,28 @@ def download_with_progress(
         return b"".join(chunks)
 
 
-def pick_schedule_member(names: List[str], year: int) -> Optional[str]:
-    """Choose the played-schedule file from a year's ZIP member names.
-
-    Retrosheet names the file ``{year}schedule.csv``. For 2020 the ZIP holds
-    two files — ``2020schedule.csv`` (the played 60-game slate) and
-    ``2020sched-orig.csv`` (the pre-pandemic original); we always want the
-    *played* one, so any member whose name contains "orig" is excluded.
-    Falls back to the first non-orig ``.csv``/``.txt`` member.
-    """
-    candidates = [
-        n for n in names
-        if "orig" not in n.lower() and n.lower().endswith((".csv", ".txt"))
-    ]
-    if not candidates:
-        return None
-    exact = f"{year}schedule.csv"
-    for n in candidates:
-        if n.lower().endswith(exact):
-            return n
-    # Prefer an explicit "rev" (revised/played) member if one exists.
-    for n in candidates:
-        if "rev" in n.lower():
-            return n
-    return candidates[0]
-
-
-def parse_schedule_rows(text: str, year: int) -> List[Tuple]:
-    """Parse a Retrosheet schedule file into ``Schedules`` row tuples.
-
-    ``text`` is the decoded file body. Rows whose first field is not an
-    8-digit ``yyyymmdd`` date (the header row, blank lines) are skipped, so
-    the function is header-tolerant regardless of Retrosheet's formatting.
-    Empty postponement / makeup fields become ``None``.
-    """
-    rows: List[Tuple] = []
-    reader = csv.reader(io.StringIO(text))
-    for fields in reader:
-        if len(fields) < 12:
-            continue
-        date_raw = fields[0].strip()
-        if len(date_raw) != 8 or not date_raw.isdigit():
-            # Header row or malformed line — skip.
-            continue
-        game_num_raw = fields[1].strip()
-        makeup_raw = fields[11].strip()
-        postponed_raw = fields[10].strip()
-        rows.append(
-            (
-                year,
-                int(date_raw),
-                int(game_num_raw) if game_num_raw.isdigit() else 0,
-                fields[2].strip(),
-                fields[3].strip(),
-                fields[4].strip(),
-                fields[6].strip(),
-                fields[7].strip(),
-                fields[9].strip(),
-                postponed_raw or None,
-                int(makeup_raw) if makeup_raw.isdigit() and len(makeup_raw) == 8 else None,
-            )
-        )
-    return rows
-
-
-def create_schedule_table(conn: sqlite3.Connection) -> None:
-    """Create the ``Schedules`` table and its ``(year)`` index if absent."""
-    cols = ", ".join(f"{name} {typ}" for name, typ in SCHEDULE_COLUMNS)
-    conn.execute(f"CREATE TABLE IF NOT EXISTS Schedules ({cols})")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS schedules_year_idx ON Schedules (year)"
-    )
-
-
-def replace_year(conn: sqlite3.Connection, year: int, rows: List[Tuple]) -> int:
-    """Clear a year's rows and insert the parsed ones (idempotent per year)."""
-    col_names = [name for name, _ in SCHEDULE_COLUMNS]
-    placeholders = ", ".join("?" for _ in col_names)
-    sql = f"INSERT INTO Schedules ({', '.join(col_names)}) VALUES ({placeholders})"
-    conn.execute("DELETE FROM Schedules WHERE year = ?", (year,))
-    conn.executemany(sql, rows)
-    conn.commit()
-    return len(rows)
-
-
-def load_zip_for_year(
-    year: int, url_template: str, local_zip: Optional[Path]
-) -> bytes:
-    """Return the ZIP bytes for a year, from a local file or download."""
-    if local_zip is not None:
-        data = local_zip.read_bytes()
-    else:
-        data = download_with_progress(
-            url_template.format(year=year), desc=f"Downloading {year} schedule"
-        )
-    if data[:4] != b"PK\x03\x04":
-        raise ValueError(f"{year}: downloaded file is not a valid ZIP archive")
-    return data
-
-
 def build_year(
     conn: sqlite3.Connection,
     year: int,
     url_template: str = SCHEDULE_URL,
     local_zip: Optional[Path] = None,
 ) -> int:
-    """Download/parse/insert a single year. Returns rows inserted."""
-    data = load_zip_for_year(year, url_template, local_zip)
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        member = pick_schedule_member(zf.namelist(), year)
-        if member is None:
-            raise ValueError(
-                f"{year}: no schedule file found in ZIP "
-                f"(members: {zf.namelist()})"
-            )
-        print(f"  Using file: {member}")
-        text = zf.read(member).decode("utf-8", "replace")
-    rows = parse_schedule_rows(text, year)
+    """Download/parse/insert a single year via the shared ingest module.
+
+    Wraps ``schedule_ingest.fetch_schedule_rows`` with the CLI progress bar
+    (for the network path) and ``ingest_rows`` for persistence. Returns rows
+    inserted; raises ``ValueError`` when a year parses to zero rows.
+    """
+    if local_zip is not None:
+        rows = fetch_schedule_rows(year, local_zip=local_zip)
+    else:
+        def fetch(url: str) -> bytes:
+            return download_with_progress(url, desc=f"Downloading {year} schedule")
+
+        rows = fetch_schedule_rows(year, fetch=fetch, url_template=url_template)
     if not rows:
         raise ValueError(f"{year}: parsed 0 schedule rows")
-    inserted = replace_year(conn, year, rows)
+    inserted = ingest_rows(conn, year, rows)
     print(f"  {year}: inserted {inserted} rows")
     return inserted
 
