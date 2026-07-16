@@ -93,10 +93,23 @@ A new modal, `src/tui/screens/historical_year_select_screen.py`:
 
 - `class HistoricalYearSelectScreen(ModalScreen[Optional[int]])`.
 - Constructor takes the **list of buildable years** (descending ints, as
-  `_available_years()` returns) — *not* the repo — plus an optional `default_year`.
-  Keeping it a pure `List[int]` in / `Optional[int]` out keeps it DB-free and unit-
-  testable, and lets Piece 2 pass in annotation data without a second constructor
-  churn (see Piece 2).
+  `_available_years()` returns) — *not* the repo — plus an optional `default_year`
+  and an optional **`notice: Optional[str] = None`** (see the persistent-notice
+  bullet below). Keeping it a pure `List[int]`/`Optional[str]` in / `Optional[int]`
+  out keeps it DB-free and unit-testable, and lets Piece 2 add its per-year cached
+  annotation without a second constructor churn (see Piece 2).
+- **Persistent notice line (moved here from Piece 2 — see the FRE-165 correction
+  below).** The screen accepts `notice: Optional[str] = None`, stores it as
+  `self._notice`, and — when non-empty — renders it as a **persistent**
+  (non-auto-dismiss) error-styled inline line at the bottom of the modal. This is a
+  faithful port of the `#choice-notice` line the flat `ChoiceScreen` already ships
+  (FRE-155): reuse its CSS idiom (error color, top border, only composed when
+  `self._notice` is truthy). Storing it as `self._notice` keeps main's shipped
+  `test_unresolved_id_failure_shows_persistent_notice` (which asserts the pushed
+  screen's `_notice is not None`) green after the flat picker is replaced. The
+  *content* of the notice and the flow-side accumulation of failures across all six
+  sites remain Piece 2's job; Piece 1 only builds the screen's rendering seam and
+  preserves the one caller that already passes a notice (the unresolved-id case).
 - Two phases, mirroring `TeamSelectScreen` minus the team phase:
   - **Decade phase** — options are `{decade}s` for each decade present in the year
     list, descending (2020s … 1870s). Enter → year phase for that decade. Esc →
@@ -111,11 +124,27 @@ A new modal, `src/tui/screens/historical_year_select_screen.py`:
   list styling and in-box hint so it reads as one system).
 - Title "⚾ HISTORICAL SEASON" to match the step it replaces.
 
-Wire it in `HistoricalSeasonSetupFlow._select_year()`: build the buildable-years
-list as today, push `HistoricalYearSelectScreen(years, default_year=years[0])` with
-the existing `on_chosen(choice)` callback — `choice is None` → `_on_cancel()`,
-otherwise `_fetch_schedule_if_missing(choice)` (now already an `int`, so drop the
-`int(choice_id)` cast). The empty-years guard and its notify are unchanged.
+Wire it in `HistoricalSeasonSetupFlow._select_year()`. **This method already carries
+a `notice: Optional[str] = None` parameter on `main` (added by FRE-155)** — keep it.
+Build the buildable-years list as today and push
+`HistoricalYearSelectScreen(years, default_year=years[0], notice=notice)`, threading
+the existing `notice` straight into the new screen (this is the port of the old
+`ChoiceScreen(..., notice=notice)` call). The `on_chosen(choice)` callback keeps its
+shape — `choice is None` → `_on_cancel()`, otherwise `_fetch_schedule_if_missing(choice)`
+(now already an `int`, so drop the `int(choice_id)` cast). The empty-years guard and
+its notify are unchanged. `_build_league`'s unresolved-id path (which on `main` calls
+`self._select_year(notice=notice)` with **no** toast) is left exactly as FRE-155 shipped
+it — the notice now renders on the new screen instead of `ChoiceScreen`, so there is no
+regression window.
+
+> **FRE-160 branches onto `main` after FRE-155.** PR #38 was cut from `562566a`
+> (pre-FRE-155) and must be **rebased onto `main`**; the only real conflict is in
+> `_select_year` (keep FRE-155's `notice` param + docstring; swap the pushed screen to
+> `HistoricalYearSelectScreen(..., notice=notice)`). The two colliding tests are
+> reconciled *in FRE-160*: keep `main`'s `test_unresolved_id_failure_shows_persistent_notice`
+> (it now asserts the new screen's `_notice`), and drop the branch's stale pre-FRE-155
+> `test_build_failure_names_teams_and_reprompts_year` toast assertion in favor of `main`'s
+> toast-free unresolved-id expectation.
 
 The flow's callback-driven test idiom (`FakeApp` records `push_screen(screen,
 callback)`; the test invokes the callback with what a real screen would dismiss)
@@ -124,29 +153,31 @@ an `int`/`None` instead of a `str`/`None`.
 
 ### Piece 2 — Persistent failure line + cached-year annotation (issue FRE-161)
 
-Builds on Piece 1's screen. Two additions, both surfaced *in the picker*:
+Builds on Piece 1's screen. Two additions surfaced *in the picker*. **The screen's
+persistent-notice *rendering* now lands in Piece 1 (FRE-160)** — see the FRE-165
+correction below; Piece 2 owns the *flow-side generalization* that feeds that line
+and the cached annotation.
 
-**(a) Persistent "last failure" line.** The flow remembers the most recent failure
-message (an `Optional[str]`, `self._last_error`, set at each of the six failure
-sites above just before it calls `_select_year()`, cleared when a year advances past
-the build successfully). `_select_year()` passes it to the screen, which renders it
-as a **persistent** (non-auto-dismiss) inline line at the bottom of the modal —
-styled as an error, only shown when non-empty. Because the flow re-enters
-`_select_year()` after every failure, the line is always present on the picker the
-user lands back on, with the exact reason the last pick failed. The transient
+**(a) Generalize the persistent "last failure" line to every failure path.** The
+screen already renders `self._notice` as a persistent inline line (Piece 1). Today
+(after FRE-155) only the *unresolved-id* site passes a notice; the other five failure
+sites still fire a transient toast and re-enter `_select_year()` with no notice.
+Piece 2 makes the flow remember the most recent failure message
+(`self._last_error: Optional[str]`), setting it at each of the **six** failure sites
+just before it returns to `_select_year()`, and clearing it once a year advances past
+the successful build. `_select_year()` passes it through as the screen's `notice`
+(`_select_year(notice=self._last_error)` on the failure re-entry paths). The transient
 `notify` toasts may stay (immediate feedback) or be dropped in favor of the inline
 line — implementer's call — but the **inline line is the durable record** and is the
 required deliverable.
 
-This **generalizes FRE-155**: FRE-155 makes the *unresolved-team* failure persistent
-and actionable (with the `build_lahman_db.py` remediation) via a mechanism of the
-implementer's choice. Piece 2 provides the single mechanism — the inline picker line
-— that every failure routes through. **FRE-161 is blocked by FRE-155** so FRE-155
-lands its actionable message first; Piece 2 then relocates that message onto the
-inline line (preserving FRE-155's DoD: the unresolved-id case still shows the
-rebuild command, now on the persistent line) and extends the same durable treatment
-to the fetch / no-played-games / degenerate-shape / team-load failures. This
-ordering also guarantees the two issues never edit `_build_league`'s messaging in
+This **completes FRE-155's generalization**: FRE-155 made the *unresolved-team*
+failure persistent and actionable (with the `build_lahman_db.py` remediation) and
+Piece 1 ported its rendering onto the new screen. Piece 2 routes the remaining five
+failures (fetch / no-played-games / degenerate-shape / team-load) through the same
+`self._last_error` → `notice` seam, **preserving FRE-155's content** (the unresolved-id
+line must still name the rebuild command). **FRE-161 stays blocked by FRE-155 and
+FRE-160** (both merged before it), so no two issues edit `_build_league`'s messaging in
 parallel.
 
 **(b) Cached-vs-fetch annotation.** For each year option, annotate whether its
@@ -160,19 +191,47 @@ This is the issue's "bonus": the user sees which picks are offline-cheap before
 committing to one that needs the network.
 
 The `HistoricalYearSelectScreen` constructor therefore accepts optional
-`last_error: Optional[str] = None` and `cached: Optional[Dict[int, bool]] = None`
-(both default off, so Piece 1 constructs it with neither and Piece 2 adds them — no
-signature break between the two issues, only additive optional params).
+`notice: Optional[str] = None` (added in Piece 1) and
+`cached: Optional[Dict[int, bool]] = None` (added in Piece 2) — both default off, so
+Piece 2's addition is a purely additive optional param with no signature break.
 
-### Why serialize B after A (and after FRE-155)
+### Why serialize A → B → and both after FRE-155
 
-A → B is a hard code dependency (B annotates and adds a line to the screen A
-creates). B → after-FRE-155 is a coordination dependency (both concern the
-persistent presentation of the unresolved-team failure; serializing prevents a
-duplicated/competing mechanism and a parallel edit to `_build_league`). FRE-155 and
-Piece 1 are mutually independent (different concerns; the only shared file is
-`historical_setup_flow.py`, FRE-155 in `_build_league`, Piece 1 in `_select_year` —
-a trivial rebase at worst) and may run in parallel.
+**FRE-155 must land before Piece 1 (FRE-160), not beside it.** The original spec
+claimed FRE-155 and Piece 1 were independent — *"the only shared file is
+`historical_setup_flow.py`, FRE-155 in `_build_league`, Piece 1 in `_select_year` — a
+trivial rebase at worst … may run in parallel."* **That was wrong** (see the FRE-165
+correction below): FRE-155 also added a `notice` parameter to **`_select_year`** and
+made the persistent picker line the *sole* feedback for the unresolved-id failure (it
+removed that case's toast). Piece 1 replaces the very screen that renders that line, so
+the two collide semantically, not textually — a naive rebase silences a shipped failure
+message and breaks the suite. Piece 1 therefore **branches onto `main` after FRE-155**
+and ports the notice-rendering seam across (the added `notice` param on the new screen).
+
+A → B (Piece 1 → Piece 2) is a hard code dependency: Piece 2 adds the flow-side
+`self._last_error` accumulation and the per-year cached annotation onto the screen and
+`_select_year` seam that Piece 1 creates. B → after-FRE-155 is a coordination
+dependency: both concern the persistent presentation of the unresolved-team failure, so
+serializing keeps a single mechanism and one editor of `_build_league`'s messaging.
+
+### FRE-165 correction (2026-07-16)
+
+This spec originally decomposed the persistent-notice work so that FRE-160 built only
+the DB-free Decade ▸ Year screen and **all** persistent-line work (rendering + flow-side
+accumulation) sat in FRE-161, and it asserted FRE-155 ⟂ FRE-160 could run in parallel.
+Both were defects, caught when FRE-160's PR #38 reached review (see FRE-165):
+
+- **FRE-155 was not confined to `_build_league`.** It added `notice` to `_select_year`,
+  threaded it into `ChoiceScreen(..., notice=notice)`, and **removed the unresolved-id
+  toast** — making the picker line the only feedback for that case. Replacing the screen
+  (FRE-160) without a notice seam is a silent regression + a test break, so there is no
+  correct mechanical rebase.
+- **Fix (Option A):** move the *screen-side* notice rendering into FRE-160 (a small
+  additive `notice` param + a ported `#choice-notice`-style line), rebase FRE-160 onto
+  `main`, and reconcile the two conflicting tests inside FRE-160. FRE-161 narrows to the
+  flow-side generalization (`self._last_error` across all six sites, feeding the same
+  `notice` seam) plus the cached-year annotation. FRE-160 now (correctly) depends on
+  FRE-155, which is already merged.
 
 ## Open questions
 
@@ -196,5 +255,8 @@ annotations); recorded here, not deferred to a human.
 
 | Issue | Title | Depends on | Risk |
 | --- | --- | --- | --- |
-| FRE-160 | Decade ▸ Year picker for the historical-season setup flow | — | — |
-| FRE-161 | Persistent inline last-failure line + cached-year annotation on the historical picker | FRE-160, FRE-155 | — |
+| FRE-160 | Decade ▸ Year picker + persistent-notice rendering seam for the historical-season setup flow | FRE-155 (rebase onto `main`) | — |
+| FRE-161 | Generalize the persistent last-failure line to all six failure sites + cached-year annotation | FRE-160, FRE-155 | — |
+
+*Dependencies corrected by FRE-165 (2026-07-16): FRE-160 now depends on FRE-155 — see
+the "FRE-165 correction" section above.*
