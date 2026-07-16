@@ -1,0 +1,8 @@
+Date,Num,Day,Visitor,League,Game,Home,League,Game,Day/Night,Location,Postponed,Makeup
+20240320,0,Wednesday,LAN,NL,1,SDN,NL,1,n,SEO01,,
+20240321,0,Thursday,SDN,NL,2,LAN,NL,2,n,SEO01,,
+20240328,0,Thursday,MIL,NL,1,NYN,NL,1,d,NYC20,Rain,20240329
+20240328,0,Thursday,ANA,AL,1,BAL,AL,1,d,BAL12,,
+20240329,1,Friday,MIL,NL,2,NYN,NL,2,d,NYC20,,
+20240329,2,Friday,MIL,NL,3,NYN,NL,3,n,NYC20,,
+20240615,0,Saturday,COL,NL,1,SFN,NL,1,d,SFO03,Rain,
