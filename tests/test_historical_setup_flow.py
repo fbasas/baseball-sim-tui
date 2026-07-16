@@ -304,6 +304,10 @@ def test_fetch_failure_returns_to_year_picker(monkeypatch, tmp_path):
     assert isinstance(app.last_screen, HistoricalYearSelectScreen)  # year picker, not toggle
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "No schedule is available for 1906" in error_notes[-1]
+    # FRE-161: the fetch pass's message is threaded onto the persistent inline
+    # line, not only the toast — the same text lands on the re-pushed picker.
+    assert flow._last_error == error_notes[-1]
+    assert app.last_screen._notice == error_notes[-1]
     assert "controller" not in captured
     assert "cancel" not in captured
 
@@ -412,6 +416,8 @@ def test_unresolved_id_failure_shows_persistent_notice(monkeypatch, tmp_path):
     assert notice is not None
     assert "ANA" in notice  # names the unresolved Retrosheet id
     assert "build_lahman_db.py" in notice  # the remediation command
+    # FRE-161: the notice on the screen is exactly the flow's persisted last error.
+    assert flow._last_error == notice
     # The unresolved case is surfaced *only* via the persistent notice — no
     # error toast that silently disappears.
     assert not [msg for msg, kw in app.notes if kw.get("severity") == "error"]
@@ -448,10 +454,11 @@ def test_unresolved_notice_names_every_unresolved_id(monkeypatch, tmp_path):
     assert "build_lahman_db.py" in notice
 
 
-def test_non_unresolved_build_failure_keeps_toast(monkeypatch, tmp_path):
-    # A failure with no unresolved-id component (e.g. a missing team record)
-    # keeps the existing error toast and shows no persistent notice — FRE-155
-    # only special-cases the unresolved-Retrosheet-id sub-case.
+def test_non_unresolved_build_failure_persists_and_keeps_toast(monkeypatch, tmp_path):
+    # FRE-161 generalizes the persistent line to *every* failure: a non-unresolved
+    # build failure (e.g. a missing team record) now also lands on the picker's
+    # persistent inline line — the same message as its toast (which stays, the
+    # unresolved sub-case's rebuild remediation is the only toast-free one).
     _install_team_loader(monkeypatch)
     _install_builder(
         monkeypatch,
@@ -466,9 +473,13 @@ def test_non_unresolved_build_failure_keeps_toast(monkeypatch, tmp_path):
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "TC (no 1927 team record)" in error_notes[-1]
     # Back at the year picker (the new Decade ▸ Year screen), not the your-team
-    # screen, with no persistent notice for this non-unresolved case.
+    # screen, and the failure now persists on the inline line (same text as the
+    # toast), not just a vanishing toast.
     assert isinstance(app.last_screen, HistoricalYearSelectScreen)
-    assert app.last_screen._notice is None  # no persistent notice for this case
+    assert app.last_screen._notice == error_notes[-1]
+    assert flow._last_error == error_notes[-1]
+    # No rebuild command for a non-unresolved cause (that's the FRE-155 sub-case).
+    assert "build_lahman_db.py" not in app.last_screen._notice
     assert "controller" not in captured
 
 
@@ -484,6 +495,9 @@ def test_team_load_failure_names_team_and_reprompts_year(monkeypatch, tmp_path):
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "1927 TC Club" in error_notes[-1]
     assert isinstance(app.last_screen, HistoricalYearSelectScreen)
+    # FRE-161: the team-load failure also persists on the inline line.
+    assert flow._last_error == error_notes[-1]
+    assert app.last_screen._notice == error_notes[-1]
     assert "controller" not in captured
 
 
@@ -509,7 +523,65 @@ def test_degenerate_season_reprompts_year(monkeypatch, tmp_path):
     # Back at the year picker (the new Decade ▸ Year screen), not the your-team
     # screen.
     assert isinstance(app.last_screen, HistoricalYearSelectScreen)
+    # FRE-161: the ValueError branch (degenerate shape) persists verbatim too.
+    assert flow._last_error == str(err)
+    assert app.last_screen._notice == str(err)
     assert "controller" not in captured
+
+
+def test_last_error_cleared_after_successful_build(monkeypatch, tmp_path):
+    # FRE-161: the persistent line clears once a year builds past the loaded-teams
+    # check. Fail on the first pick, then pick a year that builds cleanly — the
+    # error must not haunt the picker on a later back-out.
+    _install_team_loader(monkeypatch)
+    # First build raises (unresolved id), then subsequent builds succeed.
+    calls = {"n": 0}
+
+    def flaky_build(repo, year, user_team_key=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise HistoricalSeasonError(year, ["ANA (unresolved Retrosheet id)"])
+        return _fake_state()
+
+    monkeypatch.setattr(historical_flow_module, "build_historical_season", flaky_build)
+    monkeypatch.setattr(
+        historical_flow_module, "build_generated_historical_season", flaky_build
+    )
+    for t in _LEAGUE:
+        _write_card(tmp_path, t.team_id, t.year)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+
+    flow.begin()
+    app.last_callback(YEAR)
+    app.last_callback("actual")  # build #1 fails -> _last_error set
+    assert flow._last_error is not None
+    assert app.last_screen._notice is not None
+
+    # Pick again; build #2 succeeds and reaches the your-team pick.
+    app.last_callback(YEAR)
+    app.last_callback("actual")
+    assert flow._last_error is None  # cleared past the loaded-teams check
+    assert app.last_screen._title == "⚾ YOUR TEAM"
+
+    # Backing out of the your-team pick returns to a *clean* picker (no stale line).
+    app.last_callback(None)
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
+    assert app.last_screen._notice is None
+
+
+def test_cached_map_threaded_to_year_screen(monkeypatch, tmp_path):
+    # FRE-161(b): the flow builds a {year: has_schedule} map for the buildable
+    # years and threads it to the screen's `cached` seam. 2016 & 1927 are cached,
+    # 1906 is offered but un-cached (needs a fetch).
+    _install_team_loader(monkeypatch)
+    repo = _repo(years=(2016, YEAR, 1906), has={2016, YEAR})
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, repo, tmp_path, captured)
+    flow.begin()
+
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
+    assert app.last_screen._cached == {2016: True, YEAR: True, 1906: False}
 
 
 # ---------------------------------------------------------------------------
