@@ -10,11 +10,19 @@ Two layers, house style:
   ``games_per_opponent``, and ``LeagueTeam`` league/division — including an
   existing round-robin save (int game count, no league/division keys) still
   loading unchanged.
-* **DB-backed integration** — one real year, ``pytest.skip``-guarded when
-  ``data/lahman.sqlite`` or its schedule data is absent.
+* **Offline integration** — a full-league-shaped season built entirely
+  in-process via ``tests.support.mini_lahman`` and checked with the
+  ``assert_season_invariants`` harness. This **always runs** (no skip), closing
+  the "integration tests never execute" gap (FRE-158), and a negative case
+  proves the harness rejects a degenerate 2-team/1-game season.
+* **DB-backed integration** — one real year, guarded when ``data/lahman.sqlite``
+  or its schedule data is absent. The guard is **loud** (``warnings.warn``) so a
+  skipped run is visible in the summary, not indistinguishable from a pass, and
+  the assertion is the same ``assert_season_invariants`` harness.
 """
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -25,6 +33,8 @@ from src.season.historical import (
     build_historical_season,
 )
 from src.season.state import LeagueTeam, SeasonState
+from tests.support.mini_lahman import build_mini_lahman
+from tests.support.season_invariants import assert_season_invariants
 
 
 # --- DB-free fixtures --------------------------------------------------------
@@ -310,7 +320,104 @@ class TestModelRoundTrip:
         assert len(state.schedule) == 1
 
 
-# --- DB-backed integration (guarded) ----------------------------------------
+# --- Offline integration (always runs) ---------------------------------------
+
+
+class TestOfflineIntegrationSeason:
+    """A full-league-shaped season built entirely in-process — no DB, no skip.
+
+    This is the always-running end-to-end coverage FRE-158 adds: a real
+    :class:`~src.data.lahman.LahmanRepository` over a mini SQLite that
+    ``tests.support.mini_lahman`` builds in ``tmp_path``, run through
+    ``build_historical_season`` and checked with ``assert_season_invariants``.
+    Because it never skips, a regression in the build or the join surfaces as a
+    red test on every run.
+    """
+
+    YEAR = 1927
+    MIN_LEAGUE_SIZE = 8
+
+    def _build(self, tmp_path, **kwargs):
+        from src.data.lahman import LahmanRepository
+
+        mini = build_mini_lahman(str(tmp_path / "mini.sqlite"), **kwargs)
+        repo = LahmanRepository(mini.db_path)
+        return mini, repo
+
+    def test_full_league_season_passes_invariants(self, tmp_path):
+        # 8-team double round-robin, a couple of cancellations (so retention is
+        # a real fraction, not a trivial 1.0) and a made-up game.
+        mini, repo = self._build(
+            tmp_path, year=self.YEAR, rounds=2, cancellations=2, makeups=1
+        )
+        try:
+            state = build_historical_season(repo, self.YEAR)
+            assert state.games_per_opponent is None
+            assert len(state.teams) == self.MIN_LEAGUE_SIZE
+            assert_season_invariants(
+                state,
+                raw_row_count=mini.raw_row_count,
+                lahman_games_by_team=mini.lahman_games_by_team,
+                min_league_size=self.MIN_LEAGUE_SIZE,
+                min_retention=0.8,
+                min_team_games=mini.min_played_per_team,
+            )
+        finally:
+            repo.close()
+
+    def test_alias_team_resolved_inside_build(self, tmp_path):
+        # DEFAULT_TEAMS carries teamID='LAA' with teamIDretro='ANA'; the schedule
+        # uses the Retrosheet id 'ANA', so a resolved LAA-1927 league team proves
+        # retro_to_lahman_team ran inside the build (not just in a unit test).
+        mini, repo = self._build(tmp_path, year=self.YEAR, rounds=2)
+        try:
+            state = build_historical_season(repo, self.YEAR)
+            assert "LAA-1927" in set(state.team_keys)
+            assert "ANA-1927" not in set(state.team_keys)
+        finally:
+            repo.close()
+
+    def test_full_round_trips_through_json(self, tmp_path):
+        mini, repo = self._build(tmp_path, year=self.YEAR, rounds=2)
+        try:
+            state = build_historical_season(repo, self.YEAR)
+            restored = SeasonState.from_dict(
+                json.loads(json.dumps(state.to_dict()))
+            )
+            assert restored.teams == state.teams
+            assert restored.schedule == state.schedule
+        finally:
+            repo.close()
+
+    def test_degenerate_season_rejected_by_harness(self):
+        # The exact corrupted-2024-cache shape: a 2-team "league" whose only
+        # played game survived a slate of thousands. The harness must reject it,
+        # naming the retention and league-size numbers (the FRE-149 catch).
+        from src.season.schedule import ScheduledGame
+
+        teams = [
+            LeagueTeam("SEA", 2024, "Mariners", league="AL", division="W"),
+            LeagueTeam("OAK", 2024, "Athletics", league="AL", division="W"),
+        ]
+        schedule = [[ScheduledGame(0, 0, "SEA-2024", "OAK-2024")]]
+        state = SeasonState.from_schedule(teams, schedule)
+
+        with pytest.raises(AssertionError) as exc:
+            assert_season_invariants(
+                state,
+                raw_row_count=2430,
+                lahman_games_by_team={"SEA-2024": 162, "OAK-2024": 162},
+                min_league_size=self.MIN_LEAGUE_SIZE,
+            )
+        message = str(exc.value)
+        # Names the offending numbers: league size and retention.
+        assert "league too small" in message
+        assert "2" in message and str(self.MIN_LEAGUE_SIZE) in message
+        assert "retention too low" in message
+        assert "2430" in message
+
+
+# --- DB-backed integration (guarded, loud on skip) ---------------------------
 
 LAHMAN_DB_PATH = Path(__file__).parent.parent / "data" / "lahman.sqlite"
 # Candidate years spanning eras (modern, division boundary, pre-division).
@@ -320,6 +427,11 @@ CANDIDATE_YEARS = (2016, 1969, 1927)
 @pytest.fixture
 def lahman_repo():
     if not LAHMAN_DB_PATH.exists():
+        warnings.warn(
+            f"Lahman database not found at {LAHMAN_DB_PATH} — DB-backed "
+            "integration tests skipped (build data/lahman.sqlite to run them)",
+            stacklevel=2,
+        )
         pytest.skip(f"Lahman database not found at {LAHMAN_DB_PATH}")
     from src.data.lahman import LahmanRepository
 
@@ -328,39 +440,51 @@ def lahman_repo():
     repo.close()
 
 
+def _first_year_with_schedule(repo):
+    """First candidate year with schedule data, or ``None`` with a loud warn."""
+    year = next(
+        (y for y in CANDIDATE_YEARS if repo.has_schedule(y)), None
+    )
+    if year is None:
+        warnings.warn(
+            f"no ingested schedule data for any of {CANDIDATE_YEARS} — "
+            "DB-backed season integration skipped (run build_schedule_db.py)",
+            stacklevel=2,
+        )
+    return year
+
+
 class TestBuildHistoricalSeasonDB:
     """Requires data/lahman.sqlite with ingested schedule data."""
 
     def test_build_real_year(self, lahman_repo):
-        year = next(
-            (y for y in CANDIDATE_YEARS if lahman_repo.has_schedule(y)), None
-        )
+        year = _first_year_with_schedule(lahman_repo)
         if year is None:
             pytest.skip("no schedule data for any candidate year")
 
         state = build_historical_season(lahman_repo, year)
 
-        # A real full league is many teams, all league-tagged.
-        assert len(state.teams) >= 2
         assert state.games_per_opponent is None
         assert all(t.league for t in state.teams)
 
-        keys = set(state.team_keys)
-        ids = []
-        for index, day in enumerate(state.schedule):
-            for game in day:
-                assert game.day == index  # day == list index invariant
-                assert game.home_key in keys  # every team is a league team
-                assert game.away_key in keys
-                ids.append(game.game_id)
-        # game_ids are unique and contiguous from 0 in play order.
-        assert ids == list(range(len(ids)))
-        assert len(ids) > 0
+        # The full invariant harness replaces the old `len(teams) >= 2`, which
+        # a degenerate 2-team/1-game season would have passed. G comes from the
+        # real Teams rows so the per-team band is checked against Lahman.
+        raw_row_count = len(lahman_repo.get_schedule(year))
+        lahman_games_by_team = {}
+        for team in state.teams:
+            team_season = lahman_repo.get_team_season(team.team_id, year)
+            if team_season is not None:
+                lahman_games_by_team[team.key] = team_season.games
+        assert_season_invariants(
+            state,
+            raw_row_count=raw_row_count,
+            lahman_games_by_team=lahman_games_by_team,
+            min_league_size=8,  # any real MLB season has >= 8 teams
+        )
 
     def test_real_year_round_trips(self, lahman_repo):
-        year = next(
-            (y for y in CANDIDATE_YEARS if lahman_repo.has_schedule(y)), None
-        )
+        year = _first_year_with_schedule(lahman_repo)
         if year is None:
             pytest.skip("no schedule data for any candidate year")
         state = build_historical_season(lahman_repo, year)

@@ -7,12 +7,14 @@ Two layers, house style:
   or temp SQLite. No network, no ``data/lahman.sqlite``.
 - **Integration** — ``LahmanRepository.get_schedule`` /
   ``retro_to_lahman_team`` / ``has_schedule`` against the real
-  ``data/lahman.sqlite``, **guarded with ``pytest.skip`` when the database or
-  schedule data is absent** (matching the rest of the suite).
+  ``data/lahman.sqlite``, guarded when the database or schedule data is absent.
+  The guard is **loud** (``warnings.warn``) so a skipped integration run is
+  visible in the summary rather than indistinguishable from a pass (FRE-158).
 """
 
 import importlib.util
 import sqlite3
+import warnings
 from pathlib import Path
 
 import pytest
@@ -301,6 +303,11 @@ class TestHasScheduleNoTable:
 @pytest.fixture
 def lahman_repo():
     if not LAHMAN_DB_PATH.exists():
+        warnings.warn(
+            f"Lahman database not found at {LAHMAN_DB_PATH} — schedule "
+            "integration tests skipped (build data/lahman.sqlite to run them)",
+            stacklevel=2,
+        )
         pytest.skip(f"Lahman database not found at {LAHMAN_DB_PATH}")
     repo = LahmanRepository(str(LAHMAN_DB_PATH))
     yield repo
@@ -309,6 +316,11 @@ def lahman_repo():
 
 def _skip_without_schedule(repo, year):
     if not repo.has_schedule(year):
+        warnings.warn(
+            f"No ingested schedule data for {year} — schedule integration "
+            "skipped (run build_schedule_db.py to populate it)",
+            stacklevel=2,
+        )
         pytest.skip(f"No schedule data for {year} — run build_schedule_db.py")
 
 
