@@ -405,6 +405,29 @@ class LahmanRepository:
             return False
         return cursor.fetchone() is not None
 
+    def schedule_needs_repair(self, year: int) -> bool:
+        """Whether a cached year's schedule is corrupt and must be re-fetched.
+
+        A schedule cached by the pre-FRE-147 parser from a 2024+ (13-column)
+        Retrosheet file has the ballpark code written into ``postponed`` on every
+        row, which makes every game look postponed and destroys the season
+        downstream. Because ``has_schedule`` stays true for such a year it would
+        never be re-fetched; the on-demand fetch guard therefore treats a corrupt
+        year like a missing one. Delegates the detection to the pure
+        :func:`src.data.schedule_ingest.schedule_year_is_corrupt` (which only
+        flags a year whose rows *all* carry the park-code signature), so healthy
+        years — including correctly-parsed 2024+ years after the fix — are left
+        untouched.
+
+        Args:
+            year: Season year.
+
+        Returns:
+            True if the cached rows show the park-code-in-``postponed``
+            corruption signature and the year should be re-fetched.
+        """
+        return schedule_ingest.schedule_year_is_corrupt(self.get_schedule(year))
+
     def ingest_schedule(self, year: int, rows: List[Tuple]) -> int:
         """Persist a year's parsed schedule rows into the ``Schedules`` table.
 

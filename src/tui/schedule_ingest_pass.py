@@ -38,9 +38,10 @@ class ScheduleIngest:
 
     Args:
         app: the Textual App used to ``notify`` and ``run_worker`` the fetch.
-        repo: open ``LahmanRepository`` exposing ``has_schedule(year)`` and
-            ``ingest_schedule(year, rows)`` (both touched only on the main
-            thread — the connection is thread-affine).
+        repo: open ``LahmanRepository`` exposing ``has_schedule(year)``,
+            ``schedule_needs_repair(year)`` and ``ingest_schedule(year, rows)``
+            (all touched only on the main thread — the connection is
+            thread-affine).
         fetch_rows: callable ``(year) -> rows`` doing the network + parse,
             injected so tests never hit the network. Defaults (when ``None``) to
             the module-level :func:`~src.data.schedule_ingest.fetch_schedule_rows`,
@@ -70,9 +71,13 @@ class ScheduleIngest:
         """Ensure the year's schedule is cached, then dispatch a continuation.
 
         If ``repo.has_schedule(year)`` is already true (script-ingested or a
-        previously-cached year), ``on_success`` fires immediately — no download,
-        no worker. Otherwise the network + parse runs on a background Textual
-        worker; back on the main thread the rows are written via
+        previously-cached year) **and** the cached rows are not corrupt,
+        ``on_success`` fires immediately — no download, no worker. A year cached
+        by the old parser from a 2024+ (13-column) file is detected as corrupt
+        (``repo.schedule_needs_repair``) and re-fetched exactly like a missing
+        year — the re-ingest replaces the year's rows, so the stale cache
+        self-heals (FRE-147). Otherwise the network + parse runs on a background
+        Textual worker; back on the main thread the rows are written via
         ``repo.ingest_schedule`` and ``on_success`` continues the flow. Any
         failure calls ``on_failure`` after a named notify (the caller returns to
         the year picker).
@@ -81,7 +86,7 @@ class ScheduleIngest:
         self._on_success = on_success
         self._on_failure = on_failure
 
-        if self._repo.has_schedule(year):
+        if self._repo.has_schedule(year) and not self._repo.schedule_needs_repair(year):
             on_success()
             return
 

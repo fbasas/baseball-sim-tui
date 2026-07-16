@@ -64,18 +64,28 @@ class FakeApp:
 
 
 class FakeRepo:
-    """Repo double: records ``ingest_schedule`` calls; scriptable schedule set."""
+    """Repo double: records ``ingest_schedule`` calls; scriptable schedule set.
 
-    def __init__(self, has_years=()):
+    ``corrupt_years`` scripts ``schedule_needs_repair`` — a cached year in that
+    set is reported corrupt (until re-ingested), so the fetch guard treats it
+    like a missing year (FRE-147).
+    """
+
+    def __init__(self, has_years=(), corrupt_years=()):
         self._has = set(has_years)
+        self._corrupt = set(corrupt_years)
         self.ingested = []  # list of (year, rows)
 
     def has_schedule(self, year):
         return year in self._has
 
+    def schedule_needs_repair(self, year):
+        return year in self._corrupt
+
     def ingest_schedule(self, year, rows):
         self.ingested.append((year, rows))
         self._has.add(year)
+        self._corrupt.discard(year)  # a fresh re-ingest heals the corruption
         return len(rows)
 
 
@@ -112,6 +122,22 @@ def test_cached_year_skips_fetch_and_worker():
     assert app.worker_kwargs is None  # no worker dispatched
     assert repo.ingested == []        # nothing written
     assert app.notes == []            # no "Fetching…" toast
+
+
+def test_cached_but_corrupt_year_is_refetched_and_healed():
+    # FRE-147: a year cached by the old parser (park code in `postponed`) is
+    # present but corrupt — the guard must treat it like missing, re-fetch, and
+    # overwrite the stale rows so it self-heals.
+    app, repo = FakeApp(), FakeRepo(has_years={2024}, corrupt_years={2024})
+    fresh = [_row(2024)]
+
+    captured = _run(app, repo, 2024, fetch_rows=lambda year: fresh)
+
+    assert captured == {"success": True}
+    assert repo.ingested == [(2024, fresh)]          # re-fetched despite has_schedule
+    assert app.worker_kwargs is not None             # a worker was dispatched
+    assert any("Fetching 2024 schedule" in msg for msg, _ in app.notes)
+    assert repo.schedule_needs_repair(2024) is False  # healed after re-ingest
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +224,9 @@ class ThreadAffineRepo:
         self.ingested = []
 
     def has_schedule(self, year):
+        return False
+
+    def schedule_needs_repair(self, year):
         return False
 
     def ingest_schedule(self, year, rows):
