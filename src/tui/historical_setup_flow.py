@@ -13,11 +13,13 @@ Everything downstream of the ``SeasonState`` is unchanged season machinery — t
 controller, ``SeasonHubScreen``, sim/play, and ``kind == "season"`` save/resume.
 The new work here is only the setup chain:
 
-1. **Year picker** — a ``ChoiceScreen`` over years the local database can build a
-   season for: ``get_available_years()`` intersected with Retrosheet's schedule
-   coverage (``schedule_available_for``). A picked year whose schedule is not yet
-   cached is fetched on demand (step 1a) before the toggle. Backing out returns
-   to the mode menu.
+1. **Year picker** — a two-phase Decade ▸ Year
+   :class:`~src.tui.screens.historical_year_select_screen.HistoricalYearSelectScreen`
+   over years the local database can build a season for: ``get_available_years()``
+   intersected with Retrosheet's schedule coverage (``schedule_available_for``). A
+   picked year whose schedule is not yet cached is fetched on demand (step 1a)
+   before the toggle. Backing out (Esc from the decade phase) returns to the mode
+   menu.
 1a. **Fetch-if-missing** — if the picked year has no cached schedule, the shared
    :class:`~src.tui.schedule_ingest_pass.ScheduleIngest` pass downloads + parses
    it on a Textual worker and persists it (a cache), then continues; any failure
@@ -69,6 +71,7 @@ from src.season.state import SeasonState
 from .role_card_pass import RoleCardPass
 from .schedule_ingest_pass import ScheduleIngest
 from .screens.choice_screen import ChoiceScreen
+from .screens.historical_year_select_screen import HistoricalYearSelectScreen
 
 # Sentinel id for the "watch-only (commissioner)" your-team choice. Cannot
 # collide with a team key ("{team_id}-{year}"), which never contains a space.
@@ -177,23 +180,15 @@ class HistoricalSeasonSetupFlow:
             self._on_cancel()
             return
 
-        choices = [(str(year), str(year)) for year in years]
-
-        def on_chosen(choice_id: Optional[str]) -> None:
-            if choice_id is None:
+        def on_chosen(choice: Optional[int]) -> None:
+            if choice is None:
                 # Backing out of the first step returns to the mode menu.
                 self._on_cancel()
                 return
-            self._fetch_schedule_if_missing(int(choice_id))
+            self._fetch_schedule_if_missing(choice)
 
         self._app.push_screen(
-            ChoiceScreen(
-                title="⚾ HISTORICAL SEASON",
-                prompt="Which year's league do you want to play?",
-                choices=choices,
-                default_id=str(years[0]),
-                notice=notice,
-            ),
+            HistoricalYearSelectScreen(years, default_year=years[0], notice=notice),
             on_chosen,
         )
 

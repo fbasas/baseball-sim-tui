@@ -40,6 +40,7 @@ from src.season.schedule import ScheduledGame
 from src.season.state import LeagueTeam, SeasonState
 from src.tui.historical_setup_flow import HistoricalSeasonSetupFlow
 from src.tui.screens.choice_screen import ChoiceScreen
+from src.tui.screens.historical_year_select_screen import HistoricalYearSelectScreen
 import src.tui.historical_setup_flow as historical_flow_module
 import src.tui.schedule_ingest_pass as pass_module
 from src.season.historical import (
@@ -210,10 +211,10 @@ def test_year_picker_offers_every_coverage_year(monkeypatch, tmp_path):
     flow = _make_flow(app, repo, tmp_path, captured)
     flow.begin()
 
-    assert isinstance(app.last_screen, ChoiceScreen)
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
-    year_ids = [cid for cid, _label in app.last_screen._choices]
-    assert year_ids == ["2016", "1927", "1906"]  # order preserved, gaps dropped
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
+    # The Decade ▸ Year picker is handed the buildable-years list (descending);
+    # out-of-coverage years (1870, 1876) are dropped before the push, as before.
+    assert app.last_screen._years == [2016, 1927, 1906]  # order preserved, gaps dropped
 
 
 def test_no_overlapping_year_returns_to_mode_menu(monkeypatch, tmp_path):
@@ -260,7 +261,7 @@ def test_cached_year_skips_fetch_and_goes_to_schedule_toggle(monkeypatch, tmp_pa
     monkeypatch.setattr(pass_module, "fetch_schedule_rows", no_fetch)
 
     flow.begin()
-    app.last_callback("2016")  # cached -> straight through the gate
+    app.last_callback(2016)  # cached -> straight through the gate
 
     assert app.last_screen._title == "⚾ SCHEDULE"
     assert repo.ingested == []  # nothing fetched or written
@@ -277,7 +278,7 @@ def test_uncached_year_fetches_then_advances_to_schedule_toggle(monkeypatch, tmp
     monkeypatch.setattr(pass_module, "fetch_schedule_rows", lambda year: rows)
 
     flow.begin()
-    app.last_callback("1906")  # un-cached -> fetch -> persist -> continue
+    app.last_callback(1906)  # un-cached -> fetch -> persist -> continue
 
     assert repo.ingested == [(1906, rows)]          # fetched + cached
     assert app.last_screen._title == "⚾ SCHEDULE"   # advanced past the gate
@@ -297,11 +298,10 @@ def test_fetch_failure_returns_to_year_picker(monkeypatch, tmp_path):
     monkeypatch.setattr(pass_module, "fetch_schedule_rows", boom)
 
     flow.begin()
-    app.last_callback("1906")  # un-cached -> fetch fails -> back to picker
+    app.last_callback(1906)  # un-cached -> fetch fails -> back to picker
 
     assert repo.ingested == []
-    assert isinstance(app.last_screen, ChoiceScreen)
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"  # year picker, not toggle
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)  # year picker, not toggle
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "No schedule is available for 1906" in error_notes[-1]
     assert "controller" not in captured
@@ -318,7 +318,7 @@ def test_schedule_toggle_offers_actual_and_generated(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))  # pick a year -> schedule toggle
+    app.last_callback(YEAR)  # pick a year -> schedule toggle
 
     assert isinstance(app.last_screen, ChoiceScreen)
     assert app.last_screen._title == "⚾ SCHEDULE"
@@ -334,11 +334,11 @@ def test_back_from_schedule_toggle_reprompts_year(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     assert app.last_screen._title == "⚾ SCHEDULE"
     app.last_callback(None)  # back
 
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     assert "controller" not in captured
     assert "cancel" not in captured
 
@@ -401,13 +401,13 @@ def test_unresolved_id_failure_shows_persistent_notice(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     app.last_callback("actual")
 
-    # Back at the year picker (not the your-team screen) with the message carried
-    # as a persistent inline notice, not an auto-dismiss toast.
-    assert isinstance(app.last_screen, ChoiceScreen)
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    # Back at the year picker (the new Decade ▸ Year screen, not the your-team
+    # screen) with the message carried as a persistent inline notice on that
+    # screen, not an auto-dismiss toast.
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     notice = app.last_screen._notice
     assert notice is not None
     assert "ANA" in notice  # names the unresolved Retrosheet id
@@ -437,9 +437,10 @@ def test_unresolved_notice_names_every_unresolved_id(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     app.last_callback("actual")
 
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     notice = app.last_screen._notice
     assert notice is not None
     assert "ANA" in notice and "MIL" in notice
@@ -459,13 +460,14 @@ def test_non_unresolved_build_failure_keeps_toast(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     app.last_callback("actual")
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "TC (no 1927 team record)" in error_notes[-1]
-    assert isinstance(app.last_screen, ChoiceScreen)
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    # Back at the year picker (the new Decade ▸ Year screen), not the your-team
+    # screen, with no persistent notice for this non-unresolved case.
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     assert app.last_screen._notice is None  # no persistent notice for this case
     assert "controller" not in captured
 
@@ -476,12 +478,12 @@ def test_team_load_failure_names_team_and_reprompts_year(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     app.last_callback("actual")
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "1927 TC Club" in error_notes[-1]
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     assert "controller" not in captured
 
 
@@ -498,15 +500,15 @@ def test_degenerate_season_reprompts_year(monkeypatch, tmp_path):
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     app.last_callback("actual")
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and str(err) == error_notes[-1]
     assert "2430 scheduled row(s)" in error_notes[-1]
-    # Back at the year picker, not the your-team screen.
-    assert isinstance(app.last_screen, ChoiceScreen)
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    # Back at the year picker (the new Decade ▸ Year screen), not the your-team
+    # screen.
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     assert "controller" not in captured
 
 
@@ -518,7 +520,7 @@ def test_degenerate_season_reprompts_year(monkeypatch, tmp_path):
 def _drive_to_your_team(app, flow, schedule="actual"):
     """Drive begin → year → schedule-type toggle, landing on the your-team pick."""
     flow.begin()
-    app.last_callback(str(YEAR))
+    app.last_callback(YEAR)
     app.last_callback(schedule)
 
 
@@ -561,7 +563,7 @@ def test_back_from_your_team_reprompts_year(monkeypatch, tmp_path):
     assert app.last_screen._title == "⚾ YOUR TEAM"
     app.last_callback(None)
 
-    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    assert isinstance(app.last_screen, HistoricalYearSelectScreen)
     assert "controller" not in captured
     assert "cancel" not in captured
 
