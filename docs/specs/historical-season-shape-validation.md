@@ -215,14 +215,56 @@ survey + web-verified season lengths:
 - **Folded-franchise 19th-century seasons** — may be rejected by the per-team
   floor; accepted trade-off, follow-up if ever wanted (not a blocker).
 
+## Fixtures built with `validate=True` must clear the floors (FRE-166)
+
+**Merge-collision regression, filed as FRE-166 and fixed there.** FRE-149 (this
+spec, PR #37) and FRE-158 (the always-on offline integration harness, PR #35,
+`docs/specs/schedule-test-hardening.md`) each merged green in isolation but
+collided on `main`: FRE-158's `TestOfflineIntegrationSeason` builds an 8-team
+**double** round-robin (`rounds=2` → ~14 games/team) and calls
+`build_historical_season(repo, year)` with the production default
+`validate=True`; the `MIN_GAMES_PER_TEAM=40` floor added here then rejected that
+fixture as degenerate, turning three integration tests red. Neither PR re-ran the
+other's tests post-merge (this repo has **no CI** — a local full-suite run is the
+only gate), so `main` shipped red.
+
+**The durable rule this establishes:** any test (or generated fixture) that runs
+through `build_historical_season` / `build_generated_historical_season` with
+`validate=True` is subject to all three shape checks and **must** build a slate
+that clears them — every raw team plays, ≥ `MIN_GAME_RETENTION` of raw rows
+survive, and every team plays ≥ `MIN_GAMES_PER_TEAM` games. A fixture that is
+*deliberately* tiny/structural (e.g. the 4-team `standard_schedule()`, ~3
+games/team) must instead pass `validate=False` — the escape hatch documented
+under "Why the `validate` flag" above. There is no third option: a fixture that
+neither clears the floors nor opts out will break the moment it exercises the
+default production path.
+
+For the `tests.support.mini_lahman` round-robin harness, games/team =
+`rounds × (len(teams) − 1)`. With the 8-team `DEFAULT_TEAMS`, `rounds` must be
+**≥ 6** to reach the 40 floor (6 × 7 = 42); pick a value with comfortable margin
+(e.g. `rounds=6` gives 42; a couple of cancellations still leave ≥ 41) rather
+than one that sits exactly on the floor. Because `MIN_GAMES_PER_TEAM` is an
+importable module constant already imported by the test file, the integration
+fixture should additionally **assert the coupling explicitly** — e.g.
+`assert mini.min_played_per_team >= MIN_GAMES_PER_TEAM` in `_build` — so a future
+change to either the floor or the fixture size can never again silently drop the
+fixture below the gate. Verified locally: `rounds=6` turns all four
+`TestOfflineIntegrationSeason` tests green and the full suite to 1054 passed / 60
+skipped.
+
 ## Issue breakdown
 
 Atomic — a single implementer session. The source issue **FRE-149 is repurposed
 as this implementer issue** (`Spec → Ready`); no child issues.
 
+The FRE-166 regression fix above is likewise atomic — a test-fixture change in
+`tests/test_season_historical.py` only — and **the source issue FRE-166 is
+repurposed as its own implementer issue** (`Spec → Ready`); no child issues.
+
 | # | Title | Depends on | Risk |
 | --- | --- | --- | --- |
 | FRE-149 | Shape-validate the built historical season; block degenerate leagues | — | — |
+| FRE-166 | Grow FRE-158's integration fixture above the FRE-149 per-team floor (restore `main` green) | — | — |
 
 **Definition of done**
 - `build_historical_season` raises `DegenerateHistoricalSeasonError` (numeric,
@@ -250,3 +292,34 @@ no external service, integration, or data mutation (contrast FRE-154, which is
 `risk:high` for touching DB resolution). The correctness hazard — a mis-tuned
 threshold clipping a real season — is covered by the boundary tests above, not by
 live verification.
+
+### FRE-166 — definition of done (restore `main` to green)
+
+- The three `tests/test_season_historical.py::TestOfflineIntegrationSeason`
+  failures (`test_full_league_season_passes_invariants`,
+  `test_alias_team_resolved_inside_build`, `test_full_round_trips_through_json`)
+  pass again, with the fixture built through the production default
+  `validate=True` (do **not** switch these to `validate=False` — the point of
+  this always-on harness is to exercise the real build path, gate included).
+- The integration fixture is grown so every team plays ≥ `MIN_GAMES_PER_TEAM`
+  games with comfortable margin (per "Fixtures built with `validate=True`" above):
+  bump the `rounds` passed at the three `self._build(...)` call sites (2 → ≥ 6 for
+  the 8-team `DEFAULT_TEAMS`). `test_full_league_season_passes_invariants` keeps
+  its `cancellations`/`makeups` and its `min_retention=0.8` assertion, which still
+  holds (~99% retained at `rounds=6`).
+- Add an explicit coupling guard so the fixture can never silently drift below the
+  gate again — e.g. `assert mini.min_played_per_team >= MIN_GAMES_PER_TEAM` inside
+  `TestOfflineIntegrationSeason._build` (the constant is already imported in this
+  file). `test_degenerate_season_rejected_by_harness` (the negative case) is
+  unchanged.
+- The **full** suite is green: `1054 passed, 60 skipped` on a checkout with no
+  `data/lahman.sqlite` (DB-gated tests skip; that count is the local gate — this
+  repo has no CI). Note in the PR body that the run was DB-free.
+- Scope is `tests/test_season_historical.py` only. No source change to
+  `src/season/historical.py`, the validator, or `tests/support/mini_lahman.py`.
+  The pre-existing `test_appearances_table_has_index` failure noted on FRE-166 is
+  an **environmental artifact** of the jknecht fallback DB (not present in a
+  DB-free run) and is explicitly out of scope — do not "fix" it.
+
+Not `risk:high`: a test-fixture-only change with no production-source, external
+service, or data-mutation surface.
