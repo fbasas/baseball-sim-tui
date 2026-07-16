@@ -1,0 +1,7 @@
+Date,Num,Day,Visitor,League,Game,Home,League,Game,Day/Night,Postponed,Makeup
+"20120328","0","Wed","SEA","AL",1,"OAK","AL",1,"N","",""
+"20120410","0","Tue","CHA","AL",5,"CLE","AL",5,"N","Rain","20120507"
+"20120420","0","Fri","TEX","AL",14,"DET","AL",14,"N","Rain","20120421"
+"20120507","1","Mon","CHA","AL",26,"CLE","AL",27,"D","",""
+"20120507","2","Mon","CHA","AL",27,"CLE","AL",28,"N","",""
+"20120629","0","Fri","NYA","AL",75,"CHA","AL",75,"N","Cold",""
