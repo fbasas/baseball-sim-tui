@@ -597,14 +597,26 @@ class TestOfflineIntegrationSeason:
         from src.data.lahman import LahmanRepository
 
         mini = build_mini_lahman(str(tmp_path / "mini.sqlite"), **kwargs)
+        # Coupling guard (FRE-166): this harness builds via the production
+        # default ``validate=True``, so the fixture must clear the FRE-149
+        # per-team floor or the degenerate-league gate rejects it before build.
+        # Keep the callers' ``rounds`` above the floor rather than silently
+        # drifting back under it.
+        assert mini.min_played_per_team >= MIN_GAMES_PER_TEAM, (
+            f"integration fixture is below the FRE-149 floor: "
+            f"{mini.min_played_per_team} games/team < "
+            f"MIN_GAMES_PER_TEAM={MIN_GAMES_PER_TEAM}; raise `rounds`"
+        )
         repo = LahmanRepository(mini.db_path)
         return mini, repo
 
     def test_full_league_season_passes_invariants(self, tmp_path):
-        # 8-team double round-robin, a couple of cancellations (so retention is
-        # a real fraction, not a trivial 1.0) and a made-up game.
+        # 8-team league, six circle-method cycles (8×7 games with rounds=6 =
+        # 42 games/team, clearing MIN_GAMES_PER_TEAM=40), a couple of
+        # cancellations (so retention is a real fraction, not a trivial 1.0)
+        # and a made-up game.
         mini, repo = self._build(
-            tmp_path, year=self.YEAR, rounds=2, cancellations=2, makeups=1
+            tmp_path, year=self.YEAR, rounds=6, cancellations=2, makeups=1
         )
         try:
             state = build_historical_season(repo, self.YEAR)
@@ -625,7 +637,7 @@ class TestOfflineIntegrationSeason:
         # DEFAULT_TEAMS carries teamID='LAA' with teamIDretro='ANA'; the schedule
         # uses the Retrosheet id 'ANA', so a resolved LAA-1927 league team proves
         # retro_to_lahman_team ran inside the build (not just in a unit test).
-        mini, repo = self._build(tmp_path, year=self.YEAR, rounds=2)
+        mini, repo = self._build(tmp_path, year=self.YEAR, rounds=6)
         try:
             state = build_historical_season(repo, self.YEAR)
             assert "LAA-1927" in set(state.team_keys)
@@ -634,7 +646,7 @@ class TestOfflineIntegrationSeason:
             repo.close()
 
     def test_full_round_trips_through_json(self, tmp_path):
-        mini, repo = self._build(tmp_path, year=self.YEAR, rounds=2)
+        mini, repo = self._build(tmp_path, year=self.YEAR, rounds=6)
         try:
             state = build_historical_season(repo, self.YEAR)
             restored = SeasonState.from_dict(
