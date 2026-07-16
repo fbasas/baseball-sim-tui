@@ -385,10 +385,72 @@ def test_generated_toggle_starts_season_end_to_end(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_build_failure_names_teams_and_reprompts_year(monkeypatch, tmp_path):
+def test_unresolved_id_failure_shows_persistent_notice(monkeypatch, tmp_path):
+    # FRE-155: an unresolved-Retrosheet-id build failure returns to the year
+    # picker with a persistent, actionable notice (naming the rebuild command)
+    # instead of a 12s error toast that vanishes and strands the user.
     _install_team_loader(monkeypatch)
     _install_builder(
-        monkeypatch, raises=HistoricalSeasonError(YEAR, ["rX (unresolved Retrosheet id)"])
+        monkeypatch,
+        raises=HistoricalSeasonError(YEAR, ["ANA (unresolved Retrosheet id)"]),
+    )
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    flow.begin()
+    app.last_callback(str(YEAR))
+    app.last_callback("actual")
+
+    # Back at the year picker (not the your-team screen) with the message carried
+    # as a persistent inline notice, not an auto-dismiss toast.
+    assert isinstance(app.last_screen, ChoiceScreen)
+    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    notice = app.last_screen._notice
+    assert notice is not None
+    assert "ANA" in notice  # names the unresolved Retrosheet id
+    assert "build_lahman_db.py" in notice  # the remediation command
+    # The unresolved case is surfaced *only* via the persistent notice — no
+    # error toast that silently disappears.
+    assert not [msg for msg, kw in app.notes if kw.get("severity") == "error"]
+    assert "controller" not in captured
+    assert "cancel" not in captured
+
+
+def test_unresolved_notice_names_every_unresolved_id(monkeypatch, tmp_path):
+    # Mixed problem set: the notice names all unresolved ids and omits the
+    # non-unresolved sub-cases (which the persistent message is not about).
+    _install_team_loader(monkeypatch)
+    _install_builder(
+        monkeypatch,
+        raises=HistoricalSeasonError(
+            YEAR,
+            [
+                "ANA (unresolved Retrosheet id)",
+                "MIL (unresolved Retrosheet id)",
+                "TC (empty 1927 roster)",
+            ],
+        ),
+    )
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    flow.begin()
+    app.last_callback(str(YEAR))
+    app.last_callback("actual")
+
+    notice = app.last_screen._notice
+    assert notice is not None
+    assert "ANA" in notice and "MIL" in notice
+    assert "(unresolved Retrosheet id)" not in notice  # ids only, not the marker
+    assert "build_lahman_db.py" in notice
+
+
+def test_non_unresolved_build_failure_keeps_toast(monkeypatch, tmp_path):
+    # A failure with no unresolved-id component (e.g. a missing team record)
+    # keeps the existing error toast and shows no persistent notice — FRE-155
+    # only special-cases the unresolved-Retrosheet-id sub-case.
+    _install_team_loader(monkeypatch)
+    _install_builder(
+        monkeypatch,
+        raises=HistoricalSeasonError(YEAR, ["TC (no 1927 team record)"]),
     )
     app, captured = FakeApp(), {}
     flow = _make_flow(app, _repo(), tmp_path, captured)
@@ -397,10 +459,10 @@ def test_build_failure_names_teams_and_reprompts_year(monkeypatch, tmp_path):
     app.last_callback("actual")
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
-    assert error_notes and "rX (unresolved Retrosheet id)" in error_notes[-1]
-    # Back at the year picker, not the your-team screen.
+    assert error_notes and "TC (no 1927 team record)" in error_notes[-1]
     assert isinstance(app.last_screen, ChoiceScreen)
     assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    assert app.last_screen._notice is None  # no persistent notice for this case
     assert "controller" not in captured
 
 

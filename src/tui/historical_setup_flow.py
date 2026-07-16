@@ -74,6 +74,17 @@ from .screens.choice_screen import ChoiceScreen
 # collide with a team key ("{team_id}-{year}"), which never contains a space.
 _WATCH_ONLY = "watch only"
 
+# Suffix ``build_historical_season`` appends to a ``problem_teams`` entry when a
+# Retrosheet id in the played schedule has no Lahman team (see
+# ``src.season.historical``). This is the one failure sub-case FRE-155 turns into
+# a persistent, actionable message: it means the DB can't map a team, which a
+# rebuild fixes — unlike an empty roster / missing team record.
+_UNRESOLVED_SUFFIX = "(unresolved Retrosheet id)"
+
+# The rebuild command surfaced as the remediation. Kept as a module constant so
+# the actionable-message test can assert on it without hard-coding the sentence.
+_REBUILD_COMMAND = "python scripts/build_lahman_db.py"
+
 
 class HistoricalSeasonSetupFlow:
     """Coordinates year selection, league build, and the role-card pass.
@@ -138,12 +149,20 @@ class HistoricalSeasonSetupFlow:
             if schedule_available_for(year)
         ]
 
-    def _select_year(self) -> None:
+    def _select_year(self, notice: Optional[str] = None) -> None:
         """Offer the buildable years; backing out returns to the mode menu.
 
         With no buildable year (no Lahman roster in Retrosheet's coverage range)
         the flow reports it and returns to the mode menu rather than showing an
         empty picker.
+
+        Args:
+            notice: An optional **persistent** message rendered on the picker
+                (an inline error line that does not auto-dismiss). ``_build_league``
+                passes the actionable "rebuild the database" text here for the
+                unresolved-Retrosheet-id failure, so the reason stays visible on
+                the picker the user lands back on instead of vanishing with a
+                toast. ``None`` (the default) shows the picker unadorned.
         """
         years = self._available_years()
         if not years:
@@ -173,6 +192,7 @@ class HistoricalSeasonSetupFlow:
                 prompt="Which year's league do you want to play?",
                 choices=choices,
                 default_id=str(years[0]),
+                notice=notice,
             ),
             on_chosen,
         )
@@ -246,6 +266,13 @@ class HistoricalSeasonSetupFlow:
         failure (unresolved/unloadable teams) or a team-object load failure is
         reported by name and returns to the year picker — a faithful league loads
         cleanly for supported years.
+
+        The **unresolved-Retrosheet-id** sub-case is special-cased (FRE-155):
+        instead of a 12-second toast that vanishes, the picker is re-shown with a
+        persistent, actionable notice naming the rebuild command, because that
+        failure means a stale/incomplete database the user can fix. The other
+        sub-cases (empty roster / no team record / team-object load failure) keep
+        the existing toast.
         """
         build = (
             build_generated_historical_season
@@ -255,6 +282,14 @@ class HistoricalSeasonSetupFlow:
         try:
             state = build(self._repo, year)
         except HistoricalSeasonError as exc:
+            notice = self._unresolved_id_notice(year, exc)
+            if notice is not None:
+                # Unresolved Retrosheet id(s): a stale/incomplete DB can't map a
+                # team. Return to the picker with a persistent, actionable
+                # message (naming the rebuild command) instead of a 12s toast
+                # that vanishes and strands the user (FRE-155).
+                self._select_year(notice=notice)
+                return
             self._app.notify(
                 f"Couldn't build the {year} season: "
                 f"{len(exc.problem_teams)} team(s) could not be loaded — "
@@ -305,6 +340,34 @@ class HistoricalSeasonSetupFlow:
     def _team_label(self, year: int, display_name: str) -> str:
         """``"{year} {team_name}"`` label for a league team."""
         return f"{year} {display_name}"
+
+    def _unresolved_id_notice(
+        self, year: int, exc: HistoricalSeasonError
+    ) -> Optional[str]:
+        """Actionable, persistent message for the unresolved-Retrosheet-id case.
+
+        Returns a message naming the unmatched Retrosheet id(s), the likely cause
+        (the local database predates schedule support / is missing teams), and
+        the remediation (rebuild with ``build_lahman_db.py``) — or ``None`` when
+        the failure has no unresolved-id component, so the caller keeps the
+        existing toast for the other sub-cases (empty roster / no team record).
+
+        With the FRE-154 alias table a supported year should not reach this path;
+        this is the defense-in-depth message for a genuinely stale/incomplete DB.
+        """
+        unresolved = [
+            problem[: -len(_UNRESOLVED_SUFFIX)].strip()
+            for problem in exc.problem_teams
+            if problem.rstrip().endswith(_UNRESOLVED_SUFFIX)
+        ]
+        if not unresolved:
+            return None
+        ids = ", ".join(unresolved)
+        return (
+            f"Couldn't build the {year} season: {ids} could not be matched to a "
+            f"team in your local database. It likely predates full schedule/team "
+            f"support or is missing teams — rebuild it with:  {_REBUILD_COMMAND}"
+        )
 
     # --- Your team ----------------------------------------------------------
 
