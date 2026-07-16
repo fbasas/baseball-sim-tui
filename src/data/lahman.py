@@ -4,6 +4,7 @@ import sqlite3
 from typing import List, Optional, Tuple
 
 from src.data import schedule_ingest
+from src.data.retro_team_aliases import resolve_retro_alias
 from src.data.models import (
     BattingStats,
     PitchingStats,
@@ -435,9 +436,19 @@ class LahmanRepository:
     ) -> Optional[str]:
         """Resolve a Retrosheet team id to a Lahman teamID for a season.
 
-        Uses the ``teamIDretro`` column added to the Teams table, falling back
-        to an exact ``teamID == retro_id`` match (correct for most modern
-        teams). Returns ``None`` if neither resolves for that year.
+        Resolution order (each step falls through to the next):
+
+        1. ``teamIDretro`` column (fresh / jknecht-built DBs stop here).
+        2. Exact ``teamID == retro_id`` match (correct for most modern teams).
+        3. Committed year-scoped alias table (:func:`resolve_retro_alias`) — the
+           read-only fallback for divergent franchises (ANA→LAA, MIL→ML4, …) on a
+           DB that predates the ``teamIDretro`` join key.
+        4. ``None`` (unresolved).
+
+        The order is collision-safe: the exact-match step can never mis-resolve a
+        divergent id (verified against the full Lahman ``Teams.csv``), so the
+        alias table is a safe *last* step. See
+        ``docs/specs/retro-lahman-team-join-fix.md``.
 
         Args:
             retro_id: Retrosheet team id from the schedule (e.g. ``NYA``).
@@ -475,7 +486,10 @@ class LahmanRepository:
         row = cursor.fetchone()
         if row and row["teamID"]:
             return row["teamID"]
-        return None
+
+        # Final step: committed year-scoped alias table for divergent franchises
+        # (read-only; resolves stale, teamIDretro-less DBs with no rebuild).
+        return resolve_retro_alias(retro_id, year)
 
     def close(self) -> None:
         """Close the database connection."""
