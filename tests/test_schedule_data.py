@@ -279,6 +279,94 @@ class TestRepositoryScheduleMethodsUnit:
         assert repo.retro_to_lahman_team("NYN", 1999) is None
 
 
+class TestRetroLahmanAliasEras:
+    """``retro_to_lahman_team`` across the real Retrosheet≠Lahman franchise eras.
+
+    Asserts the ``teamIDretro``-column-present resolution path (a fresh / rebuilt
+    DB) for the divergences that broke historical seasons at runtime (FRE-148):
+    ``ANA``→``LAA`` (2005+) and ``MIL``→``ML4`` (1970–1997), each contrasted with
+    a year where the same Retrosheet id maps to itself — so the *year-scoping* is
+    what's under test, not just a static alias. Mappings are from FRE-154's
+    authoritative six-mapping table (``docs/specs/retro-lahman-team-join-fix.md``).
+
+    Boundary (do not duplicate FRE-154): the column-*absent* stale-DB path, where
+    a committed alias table becomes the resolver, is FRE-154's ``risk:high``
+    regression surface and is intentionally not exercised here — every fixture DB
+    below carries a ``teamIDretro`` column.
+    """
+
+    @pytest.fixture
+    def alias_repo(self, tmp_path):
+        db = tmp_path / "alias.sqlite"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE Teams (yearID TEXT, teamID TEXT, teamIDretro TEXT, name TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO Teams (yearID, teamID, teamIDretro, name) VALUES (?,?,?,?)",
+            [
+                # ANA: same Retrosheet id, different year → different Lahman id.
+                ("2004", "ANA", "ANA", "Anaheim Angels"),
+                ("2019", "LAA", "ANA", "Los Angeles Angels of Anaheim"),
+                # MIL: divergent 1970–1997 (ML4), converges to itself in the modern era.
+                ("1994", "ML4", "MIL", "Milwaukee Brewers"),
+                ("2019", "MIL", "MIL", "Milwaukee Brewers"),
+                # Pre-war divergence.
+                ("1899", "WAS", "WSN", "Washington Senators"),
+                # Exact-match control (Retrosheet id == Lahman teamID).
+                ("2019", "NYA", "NYA", "New York Yankees"),
+            ],
+        )
+        conn.commit()
+        conn.close()
+        repo = LahmanRepository(str(db))
+        yield repo
+        repo.close()
+
+    def test_ana_resolves_to_laa_modern(self, alias_repo):
+        # 2005+ : Retrosheet keeps ANA, Lahman teamID is LAA.
+        assert alias_repo.retro_to_lahman_team("ANA", 2019) == "LAA"
+
+    def test_ana_resolves_to_ana_2004(self, alias_repo):
+        # Pre-2005 : the same Retrosheet id maps to Lahman ANA.
+        assert alias_repo.retro_to_lahman_team("ANA", 2004) == "ANA"
+
+    def test_ana_is_year_scoped(self, alias_repo):
+        # The same Retrosheet id must resolve differently by year — the exact
+        # silent-exact-match blind spot from FRE-148.
+        assert alias_repo.retro_to_lahman_team("ANA", 2019) != alias_repo.retro_to_lahman_team(
+            "ANA", 2004
+        )
+
+    def test_mil_resolves_to_ml4_1994(self, alias_repo):
+        # 1970–1997 : Retrosheet MIL, Lahman teamID is ML4.
+        assert alias_repo.retro_to_lahman_team("MIL", 1994) == "ML4"
+
+    def test_mil_resolves_to_mil_modern(self, alias_repo):
+        # Modern era : Retrosheet id and Lahman teamID have converged.
+        assert alias_repo.retro_to_lahman_team("MIL", 2019) == "MIL"
+
+    def test_mil_is_year_scoped(self, alias_repo):
+        assert alias_repo.retro_to_lahman_team("MIL", 1994) != alias_repo.retro_to_lahman_team(
+            "MIL", 2019
+        )
+
+    def test_wsn_resolves_to_was_prewar(self, alias_repo):
+        # Pre-war divergence (WSN → WAS).
+        assert alias_repo.retro_to_lahman_team("WSN", 1899) == "WAS"
+
+    def test_exact_match_control(self, alias_repo):
+        assert alias_repo.retro_to_lahman_team("NYA", 2019) == "NYA"
+
+    def test_unknown_retro_id_unresolved(self, alias_repo):
+        assert alias_repo.retro_to_lahman_team("ZZZ", 2019) is None
+
+    def test_right_id_wrong_year_unresolved(self, alias_repo):
+        # ANA is a real Retrosheet id, but no team carries it (as teamIDretro or
+        # teamID) in 1994 → unresolved rather than silently mismatched.
+        assert alias_repo.retro_to_lahman_team("ANA", 1994) is None
+
+
 class TestHasScheduleNoTable:
     """has_schedule returns False (not raising) when the Schedules table is absent."""
 
