@@ -31,6 +31,12 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
             than routing through ``dismiss(None)``. Used by MANAGER CONTROL, whose
             ``dismiss(None)`` would return to the mode menu instead of quitting.
             Independent of ``allow_quit``; off by default.
+        notice: Optional **persistent** message rendered as an error line at the
+            bottom of the modal (only shown when non-empty). Unlike a ``notify``
+            toast it does not auto-dismiss — it stays on screen for as long as the
+            modal is shown, so a caller re-showing this screen after a failure
+            (e.g. the historical year picker) can leave the reason on screen until
+            the user picks again or backs out.
     """
 
     CSS = """
@@ -73,6 +79,16 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         margin: 1 0 0 0;
         color: #6b7d6b;
     }
+
+    #choice-notice {
+        width: 100%;
+        height: auto;
+        margin: 1 0 0 0;
+        padding: 1 1 0 1;
+        border-top: solid #5a3030;
+        color: #e69a9a;
+        text-align: center;
+    }
     """
 
     _HINT = (
@@ -95,6 +111,7 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         default_id: Optional[str] = None,
         allow_quit: bool = False,
         quit_exits_app: bool = False,
+        notice: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -104,6 +121,7 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
         self._default_id = default_id or (choices[0][0] if choices else None)
         self._allow_quit = allow_quit
         self._quit_exits_app = quit_exits_app
+        self._notice = notice
 
     @property
     def _quit_enabled(self) -> bool:
@@ -138,6 +156,8 @@ class ChoiceScreen(ModalScreen[Optional[str]]):
                 option_list.add_option(Option(label, id=choice_id))
             yield option_list
             yield Label(self._hint_text, id="choice-hint")
+            if self._notice:
+                yield Label(self._notice, id="choice-notice")
 
     def on_mount(self) -> None:
         container = self.query_one("#choice-container", Container)

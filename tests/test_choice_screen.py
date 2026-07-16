@@ -127,6 +127,20 @@ def test_allow_quit_defaults_false():
 
 
 # ---------------------------------------------------------------------------
+# Persistent notice — opt-in, stored, and composed only when non-empty (FRE-155)
+# ---------------------------------------------------------------------------
+
+
+def test_notice_defaults_none():
+    assert ChoiceScreen("T", "P", _CHOICES)._notice is None
+
+
+def test_notice_stored_when_given():
+    screen = ChoiceScreen("T", "P", _CHOICES, notice="rebuild the database")
+    assert screen._notice == "rebuild the database"
+
+
+# ---------------------------------------------------------------------------
 # SetupFlow routing — mode menu opts in, control question does not
 # ---------------------------------------------------------------------------
 
