@@ -14,8 +14,14 @@ controller, ``SeasonHubScreen``, sim/play, and ``kind == "season"`` save/resume.
 The new work here is only the setup chain:
 
 1. **Year picker** — a ``ChoiceScreen`` over years the local database can build a
-   season for: ``get_available_years()`` intersected with ``has_schedule(year)``.
-   Backing out returns to the mode menu.
+   season for: ``get_available_years()`` intersected with Retrosheet's schedule
+   coverage (``schedule_available_for``). A picked year whose schedule is not yet
+   cached is fetched on demand (step 1a) before the toggle. Backing out returns
+   to the mode menu.
+1a. **Fetch-if-missing** — if the picked year has no cached schedule, the shared
+   :class:`~src.tui.schedule_ingest_pass.ScheduleIngest` pass downloads + parses
+   it on a Textual worker and persists it (a cache), then continues; any failure
+   is named and returns to the year picker. Already-cached years skip this.
 2. **Schedule type** — a ``ChoiceScreen`` toggle: **Actual schedule** (the year's
    real Retrosheet calendar) vs **Generated schedule** (the same league and
    matchup multiset re-ordered into a fresh day sequence). Backing out returns to
@@ -57,9 +63,11 @@ from src.season.historical import (
     build_generated_historical_season,
     build_historical_season,
 )
+from src.data.schedule_ingest import schedule_available_for
 from src.season.state import SeasonState
 
 from .role_card_pass import RoleCardPass
+from .schedule_ingest_pass import ScheduleIngest
 from .screens.choice_screen import ChoiceScreen
 
 # Sentinel id for the "watch-only (commissioner)" your-team choice. Cannot
@@ -118,27 +126,31 @@ class HistoricalSeasonSetupFlow:
         """Years the local database can build a historical season for.
 
         The database's seasons (``get_available_years``, most-recent-first)
-        intersected with the years that have ingested schedule data
-        (``has_schedule``) — a year needs both a roster (Lahman) and a schedule
-        (Retrosheet) to build.
+        intersected with the years Retrosheet publishes a schedule for
+        (``schedule_available_for`` — the 1877-2026 coverage range, no 1876). A
+        year needs a Lahman roster to build; its schedule is fetched on demand
+        at season start if not already cached, so the picker offers every
+        roster-backed year in coverage, not only pre-ingested ones.
         """
         return [
             year
             for year in self._repo.get_available_years()
-            if self._repo.has_schedule(year)
+            if schedule_available_for(year)
         ]
 
     def _select_year(self) -> None:
         """Offer the buildable years; backing out returns to the mode menu.
 
-        With no buildable year (schedule data never ingested) the flow reports
-        it and returns to the mode menu rather than showing an empty picker.
+        With no buildable year (no Lahman roster in Retrosheet's coverage range)
+        the flow reports it and returns to the mode menu rather than showing an
+        empty picker.
         """
         years = self._available_years()
         if not years:
             self._app.notify(
-                "No historical schedule data is available. Ingest it with "
-                "scripts/build_schedule_db.py, then rebuild the database.",
+                "No historical season data is available — the Lahman database "
+                "is missing or has no year within Retrosheet's schedule "
+                "coverage.",
                 title="Historical season unavailable",
                 severity="warning",
                 timeout=12,
@@ -153,7 +165,7 @@ class HistoricalSeasonSetupFlow:
                 # Backing out of the first step returns to the mode menu.
                 self._on_cancel()
                 return
-            self._select_schedule_type(int(choice_id))
+            self._fetch_schedule_if_missing(int(choice_id))
 
         self._app.push_screen(
             ChoiceScreen(
@@ -163,6 +175,29 @@ class HistoricalSeasonSetupFlow:
                 default_id=str(years[0]),
             ),
             on_chosen,
+        )
+
+    # --- Fetch-if-missing ---------------------------------------------------
+
+    def _fetch_schedule_if_missing(self, year: int) -> None:
+        """Ensure the year's schedule is cached, then go to the schedule toggle.
+
+        The on-demand seam between the year pick and the rest of the setup flow.
+        A year whose schedule is already in the local ``Schedules`` table
+        (script-ingested or previously fetched) proceeds instantly; otherwise
+        the shared :class:`~src.tui.schedule_ingest_pass.ScheduleIngest` pass
+        downloads + parses it on a Textual worker and persists it on the main
+        thread (a cache — the next play skips the download), then continues.
+
+        Every failure — no network, a 404 / not-a-ZIP / no schedule member /
+        zero rows, or any other error escaping the worker — is reported by name
+        by the pass and returns to the year picker (``_select_year``), never a
+        crash or a hung toast.
+        """
+        ScheduleIngest(self._app, self._repo).run(
+            year,
+            on_success=lambda: self._select_schedule_type(year),
+            on_failure=self._select_year,
         )
 
     # --- Schedule type ------------------------------------------------------
