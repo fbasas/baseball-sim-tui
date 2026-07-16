@@ -8,11 +8,15 @@ with the value a real screen would dismiss. The league builders
 ``test_season_historical`` / ``test_season_generated_schedule``) and team loads
 are monkeypatched; role cards are written into a tmp dir.
 
-Coverage (the Part-4 + Part-5 DoD):
+Coverage (the Part-4 + Part-5 DoD, plus the FRE-145 on-demand seam):
 
-- the year picker offers only years with both roster and schedule data
-  (``get_available_years`` ∩ ``has_schedule``), and no such year returns to the
-  mode menu;
+- the year picker offers every year with a roster within Retrosheet's schedule
+  coverage (``get_available_years`` ∩ ``schedule_available_for`` — un-ingested
+  years included), and no overlapping year returns to the mode menu with a
+  "no Lahman data" message;
+- fetch-if-missing (FRE-145): a cached year skips straight to the schedule-type
+  toggle; an un-cached year fetches + persists its schedule then advances; a
+  fetch failure is named and returns to the year picker;
 - backing out of the year picker returns to the mode menu (``on_cancel``);
 - the schedule-type toggle offers actual + generated and dispatches to the
   matching builder; backing out of it returns to the year picker (FRE-141);
@@ -37,6 +41,7 @@ from src.season.state import LeagueTeam, SeasonState
 from src.tui.historical_setup_flow import HistoricalSeasonSetupFlow
 from src.tui.screens.choice_screen import ChoiceScreen
 import src.tui.historical_setup_flow as historical_flow_module
+import src.tui.schedule_ingest_pass as pass_module
 from src.season.historical import HistoricalSeasonError
 
 
@@ -91,17 +96,32 @@ def _fake_state():
     return SeasonState.from_schedule(list(_LEAGUE), schedule)
 
 
-def _repo(years=(2016, YEAR, 1906), has={2016, YEAR}):
-    """Repo double: year availability + the role-card gather methods."""
-    return SimpleNamespace(
+def _repo(years=(2016, YEAR, 1906), has=(2016, YEAR)):
+    """Repo double: year availability + on-demand ingest + role-card gather.
+
+    ``has`` seeds the already-cached years (``has_schedule`` true). A successful
+    ``ingest_schedule`` records the write on ``ns.ingested`` and marks the year
+    cached, so the fetch-if-missing gate sees the year as present afterwards.
+    """
+    cached = set(has)
+    ns = SimpleNamespace(
         get_available_years=lambda: list(years),
-        has_schedule=lambda y: y in has,
+        has_schedule=lambda y: y in cached,
         get_team_season=lambda tid, yr: SimpleNamespace(team_id=tid, year=yr),
         get_team_roster=lambda tid, yr: [],
         get_batting_stats=lambda pid, yr: None,
         get_pitching_stats=lambda pid, yr: None,
         get_appearances=lambda tid, yr: [],
     )
+    ns.ingested = []
+
+    def ingest_schedule(year, rows):
+        ns.ingested.append((year, rows))
+        cached.add(year)
+        return len(rows)
+
+    ns.ingest_schedule = ingest_schedule
+    return ns
 
 
 def _install_team_loader(monkeypatch, raise_for=()):
@@ -176,27 +196,37 @@ def _make_flow(app, repo, roles_dir, captured):
 # ---------------------------------------------------------------------------
 
 
-def test_year_picker_offers_only_years_with_schedule(monkeypatch, tmp_path):
+def test_year_picker_offers_every_coverage_year(monkeypatch, tmp_path):
+    # FRE-145: offer every Lahman year within Retrosheet coverage — including
+    # ones never ingested (1906 here has no cached schedule but is still shown);
+    # only out-of-coverage years (1870 pre-1877, 1876 the gap) are dropped.
     _install_team_loader(monkeypatch)
+    repo = _repo(years=(2016, YEAR, 1906, 1876, 1870), has={2016})
     app, captured = FakeApp(), {}
-    flow = _make_flow(app, _repo(), tmp_path, captured)
+    flow = _make_flow(app, repo, tmp_path, captured)
     flow.begin()
 
     assert isinstance(app.last_screen, ChoiceScreen)
     assert app.last_screen._title == "⚾ HISTORICAL SEASON"
     year_ids = [cid for cid, _label in app.last_screen._choices]
-    assert year_ids == ["2016", "1927"]  # 1906 has no schedule; order preserved
+    assert year_ids == ["2016", "1927", "1906"]  # order preserved, gaps dropped
 
 
-def test_no_buildable_year_returns_to_mode_menu(monkeypatch, tmp_path):
+def test_no_overlapping_year_returns_to_mode_menu(monkeypatch, tmp_path):
+    # Only out-of-coverage Lahman years ⇒ empty picker (the Lahman DB is
+    # missing / has nothing in range), reported without the old "run the script".
     _install_team_loader(monkeypatch)
+    repo = _repo(years=(1870, 1876), has=())
     app, captured = FakeApp(), {}
-    flow = _make_flow(app, _repo(has=set()), tmp_path, captured)
+    flow = _make_flow(app, repo, tmp_path, captured)
     flow.begin()
 
     assert captured.get("cancel") is True
     assert app.pushed == []  # no picker shown
-    assert any(kw.get("severity") == "warning" for _m, kw in app.notes)
+    (msg, kwargs), = app.notes
+    assert kwargs.get("severity") == "warning"
+    assert "Lahman" in msg
+    assert "build_schedule_db" not in msg  # not the old "run the script" copy
 
 
 def test_back_at_year_picker_returns_to_mode_menu(monkeypatch, tmp_path):
@@ -207,6 +237,71 @@ def test_back_at_year_picker_returns_to_mode_menu(monkeypatch, tmp_path):
     app.last_callback(None)
 
     assert captured.get("cancel") is True
+
+
+# ---------------------------------------------------------------------------
+# Fetch-if-missing gate (FRE-145)
+# ---------------------------------------------------------------------------
+
+
+def test_cached_year_skips_fetch_and_goes_to_schedule_toggle(monkeypatch, tmp_path):
+    _install_team_loader(monkeypatch)
+    repo = _repo()  # 2016 and 1927 already cached
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, repo, tmp_path, captured)
+
+    def no_fetch(year):  # pragma: no cover - must not run
+        raise AssertionError("a cached year must not fetch")
+
+    monkeypatch.setattr(pass_module, "fetch_schedule_rows", no_fetch)
+
+    flow.begin()
+    app.last_callback("2016")  # cached -> straight through the gate
+
+    assert app.last_screen._title == "⚾ SCHEDULE"
+    assert repo.ingested == []  # nothing fetched or written
+    assert not any("Fetching" in msg for msg, _ in app.notes)
+
+
+def test_uncached_year_fetches_then_advances_to_schedule_toggle(monkeypatch, tmp_path):
+    _install_team_loader(monkeypatch)
+    repo = _repo()  # 1906 is offered (in coverage) but NOT cached
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, repo, tmp_path, captured)
+
+    rows = [(1906, 19060417, 0, "Tue", "rA", "NL", "rB", "NL", "D", None, None)]
+    monkeypatch.setattr(pass_module, "fetch_schedule_rows", lambda year: rows)
+
+    flow.begin()
+    app.last_callback("1906")  # un-cached -> fetch -> persist -> continue
+
+    assert repo.ingested == [(1906, rows)]          # fetched + cached
+    assert app.last_screen._title == "⚾ SCHEDULE"   # advanced past the gate
+    assert any("Fetching 1906 schedule" in msg for msg, _ in app.notes)
+    assert "cancel" not in captured
+
+
+def test_fetch_failure_returns_to_year_picker(monkeypatch, tmp_path):
+    _install_team_loader(monkeypatch)
+    repo = _repo()
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, repo, tmp_path, captured)
+
+    def boom(year):
+        raise ValueError("no schedule member")
+
+    monkeypatch.setattr(pass_module, "fetch_schedule_rows", boom)
+
+    flow.begin()
+    app.last_callback("1906")  # un-cached -> fetch fails -> back to picker
+
+    assert repo.ingested == []
+    assert isinstance(app.last_screen, ChoiceScreen)
+    assert app.last_screen._title == "⚾ HISTORICAL SEASON"  # year picker, not toggle
+    error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
+    assert error_notes and "No schedule is available for 1906" in error_notes[-1]
+    assert "controller" not in captured
+    assert "cancel" not in captured
 
 
 # ---------------------------------------------------------------------------

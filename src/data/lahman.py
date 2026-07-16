@@ -1,8 +1,9 @@
 """Repository for querying the Lahman Baseball Database."""
 
 import sqlite3
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+from src.data import schedule_ingest
 from src.data.models import (
     BattingStats,
     PitchingStats,
@@ -403,6 +404,31 @@ class LahmanRepository:
             # Schedules table doesn't exist yet.
             return False
         return cursor.fetchone() is not None
+
+    def ingest_schedule(self, year: int, rows: List[Tuple]) -> int:
+        """Persist a year's parsed schedule rows into the ``Schedules`` table.
+
+        Delegates to :func:`src.data.schedule_ingest.ingest_rows`, the single
+        write path shared with the ``build_schedule_db.py`` CLI: it ensures the
+        table exists and replaces the year's rows (idempotent per year, so a
+        re-ingest yields the same count rather than duplicating). Keeps the
+        thread-affine ``sqlite3`` connection encapsulated in the repository, so
+        the on-demand fetch flow has one call to persist a fetched schedule.
+
+        ``rows`` are the ``Schedules`` row tuples produced by
+        :func:`~src.data.schedule_ingest.fetch_schedule_rows` (or
+        ``parse_zip_bytes``). Must be called on the repository's owning thread —
+        the connection is thread-affine, so the on-demand flow gathers/parses on
+        a worker but calls this back on the main thread.
+
+        Args:
+            year: Season year the rows belong to.
+            rows: Parsed ``Schedules`` row tuples for that year.
+
+        Returns:
+            The number of rows inserted.
+        """
+        return schedule_ingest.ingest_rows(self.conn, year, rows)
 
     def retro_to_lahman_team(
         self, retro_id: str, year: int
