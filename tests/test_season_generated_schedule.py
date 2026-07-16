@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from src.season.historical import (
+    DegenerateHistoricalSeasonError,
     HistoricalSeasonError,
     build_generated_historical_season,
     build_historical_season,
@@ -91,15 +92,15 @@ def _flat_matchups(state):
 
 class TestStructurePreserved:
     def test_matchup_multiset_identical_to_actual(self):
-        actual = build_historical_season(_repo(), YEAR)
-        generated = build_generated_historical_season(_repo(), YEAR)
+        actual = build_historical_season(_repo(), YEAR, validate=False)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         # Exact multiset equality ⇒ per-team counts, home/away splits, and
         # opponent weighting are all preserved to the game.
         assert _matchup_counter(generated) == _matchup_counter(actual)
 
     def test_per_team_game_count_matches_actual(self):
-        actual = build_historical_season(_repo(), YEAR)
-        generated = build_generated_historical_season(_repo(), YEAR)
+        actual = build_historical_season(_repo(), YEAR, validate=False)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         assert _per_team_games(generated) == _per_team_games(actual)
         # The fixture's counts are deliberately uneven.
         assert _per_team_games(generated) == {
@@ -110,13 +111,13 @@ class TestStructurePreserved:
         }
 
     def test_total_games_preserved(self):
-        actual = build_historical_season(_repo(), YEAR)
-        generated = build_generated_historical_season(_repo(), YEAR)
+        actual = build_historical_season(_repo(), YEAR, validate=False)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         assert generated.total_games == actual.total_games
 
     def test_teams_and_league_metadata_preserved(self):
-        actual = build_historical_season(_repo(), YEAR)
-        generated = build_generated_historical_season(_repo(), YEAR)
+        actual = build_historical_season(_repo(), YEAR, validate=False)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         assert generated.teams == actual.teams  # same league, league/division
         assert generated.games_per_opponent is None
 
@@ -126,18 +127,18 @@ class TestStructurePreserved:
 
 class TestScheduleValidity:
     def test_day_equals_list_index(self):
-        generated = build_generated_historical_season(_repo(), YEAR)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         for index, day in enumerate(generated.schedule):
             for game in day:
                 assert game.day == index
 
     def test_game_ids_contiguous_in_play_order(self):
-        generated = build_generated_historical_season(_repo(), YEAR)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         ids = [g.game_id for day in generated.schedule for g in day]
         assert ids == list(range(len(ids)))
 
     def test_no_team_plays_twice_in_a_day(self):
-        generated = build_generated_historical_season(_repo(), YEAR)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         for day in generated.schedule:
             keys = [g.home_key for g in day] + [g.away_key for g in day]
             assert len(keys) == len(set(keys))
@@ -145,7 +146,7 @@ class TestScheduleValidity:
     def test_day_count_at_least_max_team_games(self):
         # A team plays at most once per day, so the schedule needs at least as
         # many days as the busiest team has games (10 here).
-        generated = build_generated_historical_season(_repo(), YEAR)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         busiest = max(_per_team_games(generated).values())
         assert len(generated.schedule) >= busiest
 
@@ -155,24 +156,30 @@ class TestScheduleValidity:
 
 class TestOrderAndDeterminism:
     def test_day_order_differs_from_actual(self):
-        actual = build_historical_season(_repo(), YEAR)
-        generated = build_generated_historical_season(_repo(), YEAR)
+        actual = build_historical_season(_repo(), YEAR, validate=False)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         # Same games, shuffled into a different day-by-day sequence.
         assert _flat_matchups(generated) != _flat_matchups(actual)
 
     def test_deterministic_for_same_year(self):
-        a = build_generated_historical_season(_repo(), YEAR)
-        b = build_generated_historical_season(_repo(), YEAR)
+        a = build_generated_historical_season(_repo(), YEAR, validate=False)
+        b = build_generated_historical_season(_repo(), YEAR, validate=False)
         assert a.schedule == b.schedule
 
     def test_default_seed_is_the_year(self):
-        default = build_generated_historical_season(_repo(), YEAR)
-        explicit = build_generated_historical_season(_repo(), YEAR, seed=YEAR)
+        default = build_generated_historical_season(_repo(), YEAR, validate=False)
+        explicit = build_generated_historical_season(
+            _repo(), YEAR, seed=YEAR, validate=False
+        )
         assert default.schedule == explicit.schedule
 
     def test_different_seed_gives_different_order(self):
-        a = build_generated_historical_season(_repo(), YEAR, seed=1)
-        b = build_generated_historical_season(_repo(), YEAR, seed=2)
+        a = build_generated_historical_season(
+            _repo(), YEAR, seed=1, validate=False
+        )
+        b = build_generated_historical_season(
+            _repo(), YEAR, seed=2, validate=False
+        )
         assert a.schedule != b.schedule
         # ...but the same games regardless of seed.
         assert _matchup_counter(a) == _matchup_counter(b)
@@ -184,23 +191,32 @@ class TestOrderAndDeterminism:
 class TestUserTeamAndErrors:
     def test_user_team_key_accepted(self):
         generated = build_generated_historical_season(
-            _repo(), YEAR, user_team_key="TA-1927"
+            _repo(), YEAR, user_team_key="TA-1927", validate=False
         )
         assert generated.user_team_key == "TA-1927"
 
     def test_watch_only_user_team_is_none(self):
-        generated = build_generated_historical_season(_repo(), YEAR)
+        generated = build_generated_historical_season(_repo(), YEAR, validate=False)
         assert generated.user_team_key is None
 
     def test_unknown_user_team_key_rejected(self):
         with pytest.raises(ValueError, match="not a league team"):
             build_generated_historical_season(
-                _repo(), YEAR, user_team_key="ZZZ-1927"
+                _repo(), YEAR, user_team_key="ZZZ-1927", validate=False
             )
 
     def test_empty_schedule_raises_value_error(self):
         with pytest.raises(ValueError, match="no schedule data for 1927"):
             build_generated_historical_season(FakeRepo([]), YEAR)
+
+    def test_generated_inherits_the_shape_gate(self):
+        # With the default validate=True, the generated builder threads the
+        # gate into its inner build_historical_season call, so it rejects the
+        # deliberately degenerate weighted fixture (4 teams, 8-10 games/team)
+        # before the shuffle — same games, so validating the real slate covers
+        # the shuffled one too.
+        with pytest.raises(DegenerateHistoricalSeasonError):
+            build_generated_historical_season(_repo(), YEAR)
 
     def test_unresolved_team_blocks_build(self):
         from tests.test_season_historical import RETRO_MAP
@@ -209,7 +225,9 @@ class TestUserTeamAndErrors:
         del retro_map["rD"]
         with pytest.raises(HistoricalSeasonError) as exc:
             build_generated_historical_season(
-                FakeRepo(_weighted_schedule(), retro_map=retro_map), YEAR
+                FakeRepo(_weighted_schedule(), retro_map=retro_map),
+                YEAR,
+                validate=False,
             )
         assert any("rD" in p for p in exc.value.problem_teams)
 
@@ -222,7 +240,7 @@ class TestRoundTrip:
         from src.season.state import SeasonState
 
         generated = build_generated_historical_season(
-            _repo(), YEAR, user_team_key="TA-1927"
+            _repo(), YEAR, user_team_key="TA-1927", validate=False
         )
         restored = SeasonState.from_dict(
             json.loads(json.dumps(generated.to_dict()))
