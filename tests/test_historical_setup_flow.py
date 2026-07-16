@@ -107,6 +107,7 @@ def _repo(years=(2016, YEAR, 1906), has=(2016, YEAR)):
     ns = SimpleNamespace(
         get_available_years=lambda: list(years),
         has_schedule=lambda y: y in cached,
+        schedule_needs_repair=lambda y: False,  # cached years are healthy here
         get_team_season=lambda tid, yr: SimpleNamespace(team_id=tid, year=yr),
         get_team_roster=lambda tid, yr: [],
         get_batting_stats=lambda pid, yr: None,

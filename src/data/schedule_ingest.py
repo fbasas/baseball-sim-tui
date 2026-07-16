@@ -12,9 +12,10 @@ The schedule data is copyrighted by and obtained free of charge from Retrosheet
 (https://www.retrosheet.org/). See the attribution notice in ``README.md`` and
 ``docs/adr/001-historical-schedule-data.md``.
 
-Record layout (12 comma-separated fields per game; files are quoted CSV and,
-in practice, carry a header row which the parser skips):
+Record layout — Retrosheet ships two layouts and the parser handles both
+(files are quoted CSV and, in practice, carry a header row):
 
+    Pre-2024 (12 fields):
     1  Date            yyyymmdd
     2  Game number     0 single · 1 first of DH · 2 second of DH
     3  Day of week     Sun..Sat
@@ -28,9 +29,27 @@ in practice, carry a header row which the parser skips):
     11 Postponement    non-empty when NOT played as scheduled
     12 Makeup date     yyyymmdd if the postponed game was replayed (else empty)
 
+Starting with the **2024** file, Retrosheet inserted a 13th field, ``Location``
+(the ballpark code, e.g. ``SEO01``/``TOK01``), between ``Time of day`` and
+``Postponement`` (FRE-147). Fields 1–10 never move; only ``Postponement`` and
+``Makeup date`` shift right by one:
+
+    2024+ (13 fields): 1..10 as above,
+    11 Location        ballpark code (parsed-and-skipped — NOT stored)
+    12 Postponement
+    13 Makeup date
+
+A fixed-index parser reading ``fields[10]``/``fields[11]`` misreads a 13-column
+file — the park code lands in ``postponed``, so every game looks postponed and
+the whole season is dropped downstream. :func:`parse_schedule_rows` therefore
+locates ``Postponed``/``Makeup`` by **header name** when a header is present,
+falling back to **column count** (12 vs 13) for headerless bodies. ``Location``
+is never persisted: the stored columns are unchanged across both layouts.
+
 The ``Schedules`` table stores every field except the two per-team season game
-numbers, plus a leading ``year`` column. Re-ingesting a year clears that year's
-rows first, so ingestion is idempotent per year.
+numbers and (for 2024+) ``Location``, plus a leading ``year`` column.
+Re-ingesting a year clears that year's rows first, so ingestion is idempotent
+per year.
 
 This module has **no network access at import time** and no import-time side
 effects: every top-level name is a constant or a function. Callers that must
@@ -41,6 +60,7 @@ stay off the network (tests, pure parsing) never trigger one — only
 
 import csv
 import io
+import re
 import sqlite3
 import urllib.request
 import zipfile
@@ -135,27 +155,71 @@ def pick_schedule_member(names: List[str], year: int) -> Optional[str]:
     return candidates[0]
 
 
+def _postponed_makeup_indices(fields: List[str]) -> Tuple[int, int]:
+    """Return the ``(postponed, makeup)`` field indices for a header row.
+
+    ``fields`` is a schedule header row. Only ``Postponed`` and ``Makeup`` are
+    located by name — they are the two fields whose position shifted when the
+    2024 ``Location`` column was inserted, and (unlike the duplicated ``League``
+    and ``Game`` columns) their names are unique, so a name lookup is
+    unambiguous. Everything else stays positional. Names are matched
+    case-insensitively, trimmed of surrounding whitespace/quotes. Falls back to
+    the column-count positions if either name is absent.
+    """
+    lookup = {f.strip().strip('"').lower(): i for i, f in enumerate(fields)}
+    postponed = lookup.get("postponed")
+    makeup = lookup.get("makeup")
+    if postponed is None or makeup is None:
+        return _positional_indices(len(fields))
+    return postponed, makeup
+
+
+def _positional_indices(ncols: int) -> Tuple[int, int]:
+    """Return the ``(postponed, makeup)`` indices by column count.
+
+    The 2024+ 13-column layout inserts ``Location`` at index 10, pushing
+    ``Postponed``/``Makeup`` to 11/12; the pre-2024 12-column layout keeps them
+    at 10/11. Used for headerless bodies, or as the header-lookup fallback.
+    """
+    if ncols >= 13:
+        return 11, 12
+    return 10, 11
+
+
 def parse_schedule_rows(text: str, year: int) -> List[Tuple]:
     """Parse a Retrosheet schedule file body into ``Schedules`` row tuples.
 
-    ``text`` is the decoded file body. Rows whose first field is not an
-    8-digit ``yyyymmdd`` date (the header row, blank lines) are skipped, so
-    the function is header-tolerant regardless of Retrosheet's formatting.
-    Empty postponement / makeup fields become ``None``. Pure: no network,
-    no DB.
+    ``text`` is the decoded file body. Handles both the pre-2024 (12-column)
+    and 2024+ (13-column, with the inserted ``Location`` column) layouts: the
+    ``Postponed``/``Makeup`` fields are located by **header name** when a header
+    row is present, and by **column count** otherwise (see the module
+    docstring). Fields 0–9 are always positional (they never shift), and
+    ``Location`` is parsed-and-skipped — the emitted row tuple is identical
+    across both layouts. Rows whose first field is not an 8-digit ``yyyymmdd``
+    date (the header row, blank lines) are skipped. Empty postponement / makeup
+    fields become ``None``. Pure: no network, no DB.
     """
     rows: List[Tuple] = []
+    # Header-derived indices, resolved from the first header row we see; until
+    # then (and for headerless files) fall back to column-count positioning.
+    header_indices: Optional[Tuple[int, int]] = None
     reader = csv.reader(io.StringIO(text))
     for fields in reader:
         if len(fields) < 12:
             continue
         date_raw = fields[0].strip()
         if len(date_raw) != 8 or not date_raw.isdigit():
-            # Header row or malformed line — skip.
+            # Header row or malformed line. If it names Postponed/Makeup, use it
+            # to position those fields for the data rows that follow; otherwise
+            # skip it.
+            names = {f.strip().strip('"').lower() for f in fields}
+            if "postponed" in names and "makeup" in names:
+                header_indices = _postponed_makeup_indices(fields)
             continue
+        post_idx, makeup_idx = header_indices or _positional_indices(len(fields))
         game_num_raw = fields[1].strip()
-        makeup_raw = fields[11].strip()
-        postponed_raw = fields[10].strip()
+        makeup_raw = fields[makeup_idx].strip() if makeup_idx < len(fields) else ""
+        postponed_raw = fields[post_idx].strip() if post_idx < len(fields) else ""
         rows.append(
             (
                 year,
@@ -217,6 +281,43 @@ def fetch_schedule_rows(
     else:
         data = fetch(url_template.format(year=year))
     return parse_zip_bytes(data, year)
+
+
+# A Retrosheet ballpark code: three uppercase letters + two digits (SEO01,
+# TOK01, OAK01, …). This is exactly the shape that a pre-FRE-147 parser wrote
+# into ``postponed`` for every row of a 2024/2025 (13-column) file. Real
+# postponement text ("Rain", "Cold", "Hurricane", …) never matches it.
+_PARK_CODE_RE = re.compile(r"^[A-Z]{3}\d{2}$")
+
+
+def schedule_year_is_corrupt(rows) -> bool:
+    """Whether a cached year's rows carry the pre-FRE-147 corruption signature.
+
+    Detects a year whose ``Schedules`` rows were parsed by the old fixed-index
+    parser from a 2024+ (13-column) file, which put the ballpark code into
+    ``postponed`` on **every** row (see the module docstring). ``rows`` are the
+    :class:`~src.data.models.ScheduleRow` objects
+    :meth:`~src.data.lahman.LahmanRepository.get_schedule` returns (anything
+    with a ``.postponed`` attribute). Pure: no network, no DB.
+
+    A year is flagged corrupt when it has cached rows AND **every** non-empty
+    ``postponed`` value matches the park-code shape AND more than half of all
+    rows carry such a value. Both conditions are required and each rules out a
+    healthy year on its own: in a correctly-parsed season only a small fraction
+    of games are ever postponed (so the >50% majority test fails), and real
+    postponement text never matches the park-code regex (so the all-match test
+    fails). Together they cleanly separate a wholly-corrupt year from any
+    healthy one without a tunable percentage threshold.
+    """
+    if not rows:
+        return False
+    postponed_values = [r.postponed for r in rows if r.postponed]
+    # >50% of rows carry a postponed value — impossible for a real season, where
+    # postponements are a small minority.
+    if len(postponed_values) * 2 <= len(rows):
+        return False
+    # …and every one of them is a park code, not real postponement text.
+    return all(_PARK_CODE_RE.match(v) for v in postponed_values)
 
 
 def create_schedule_table(conn: sqlite3.Connection) -> None:

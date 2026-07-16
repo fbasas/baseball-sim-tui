@@ -36,6 +36,18 @@ FIXTURE_SCHEDULE = (
     '"20160908","0","Thu","SFN","NL",140,"SDN","NL",141,"N","Hurricane",""\n'
 )
 
+# --- The 2024+ 13-column layout (FRE-147) -----------------------------------
+# Retrosheet inserted a 13th `Location` (ballpark-code) column between
+# `Day/Night` and `Postponed` starting with the 2024 file. A normal game, a
+# postponed-with-makeup game, and a postponed-without-makeup game — each row
+# carries a park code that must never leak into `postponed`.
+FIXTURE_SCHEDULE_13COL = (
+    'Date,Num,Day,Visitor,League,Game,Home,League,Game,Day/Night,Location,Postponed,Makeup\n'
+    '"20240328","0","Thu","OAK","AL",1,"SEA","AL",1,"N","SEO01","",""\n'
+    '"20240402","0","Tue","BOS","AL",1,"OAK","AL",1,"D","OAK01","Rain","20240403"\n'
+    '"20240615","0","Sat","SDN","NL",1,"CHN","NL",1,"D","TOK01","Hurricane",""\n'
+)
+
 
 def _make_zip(members: dict) -> bytes:
     """Build an in-memory ZIP from ``{member_name: text}`` — no network, no fs."""
@@ -264,6 +276,130 @@ class TestIngestRows:
             assert cold.postponed == "Cold" and cold.makeup_date == 20160405
             cancelled = next(r for r in got if r.date == 20160908)
             assert cancelled.postponed == "Hurricane" and cancelled.makeup_date is None
+        finally:
+            repo.close()
+
+
+class TestParse13ColumnLayout:
+    """parse_schedule_rows on the 2024+ 13-column (Location) layout (FRE-147)."""
+
+    def _rows(self):
+        return si.parse_schedule_rows(FIXTURE_SCHEDULE_13COL, 2024)
+
+    def test_row_count_and_year_header_skipped(self):
+        rows = self._rows()
+        assert len(rows) == 3               # header dropped
+        assert all(r[0] == 2024 for r in rows)
+
+    def test_normal_game_park_code_not_in_postponed(self):
+        row = next(r for r in self._rows() if r[1] == 20240328)
+        # postponed (idx 9) and makeup_date (idx 10) are both empty — the park
+        # code SEO01 must NOT have landed in postponed.
+        assert row[9] is None and row[10] is None
+
+    def test_postponed_with_makeup(self):
+        row = next(r for r in self._rows() if r[1] == 20240402)
+        assert row[9] == "Rain"
+        assert row[10] == 20240403          # makeup_date as int
+
+    def test_postponed_without_makeup(self):
+        row = next(r for r in self._rows() if r[1] == 20240615)
+        assert row[9] == "Hurricane"
+        assert row[10] is None              # cancelled — no makeup
+
+    def test_no_park_code_leaks_into_postponed(self):
+        # No row's postponed value looks like a park code (^[A-Z]{3}\d{2}$).
+        import re
+
+        park = re.compile(r"^[A-Z]{3}\d{2}$")
+        assert not any(r[9] and park.match(r[9]) for r in self._rows())
+
+    def test_stored_fields_identical_shape_to_12col(self):
+        # The 2024+ parse emits the same 11-field tuple as the 12-column parse;
+        # Location is skipped, not stored.
+        rows12 = si.parse_schedule_rows(FIXTURE_SCHEDULE, 2016)
+        rows13 = self._rows()
+        assert len(rows12[0]) == len(rows13[0]) == 11
+
+    def test_12col_fixture_unchanged(self):
+        # No regression: the pre-2024 layout still parses exactly as before.
+        rows = si.parse_schedule_rows(FIXTURE_SCHEDULE, 2016)
+        assert len(rows) == 5
+        cold = next(r for r in rows if r[1] == 20160404)
+        assert cold[9] == "Cold" and cold[10] == 20160405
+        normal = next(r for r in rows if r[1] == 20160403)
+        assert normal[9] is None and normal[10] is None
+
+    def test_headerless_13col_falls_back_to_column_count(self):
+        # A headerless 13-column body still parses via the column-count fallback
+        # (Location at idx 10, postponed at 11, makeup at 12).
+        body = "\n".join(FIXTURE_SCHEDULE_13COL.splitlines()[1:])  # drop header
+        rows = si.parse_schedule_rows(body, 2024)
+        assert len(rows) == 3
+        row = next(r for r in rows if r[1] == 20240402)
+        assert row[9] == "Rain" and row[10] == 20240403
+        normal = next(r for r in rows if r[1] == 20240328)
+        assert normal[9] is None and normal[10] is None
+
+    def test_headerless_12col_falls_back_to_column_count(self):
+        body = "\n".join(FIXTURE_SCHEDULE.splitlines()[1:])  # drop header
+        rows = si.parse_schedule_rows(body, 2016)
+        assert len(rows) == 5
+        cold = next(r for r in rows if r[1] == 20160404)
+        assert cold[9] == "Cold" and cold[10] == 20160405
+
+
+class TestScheduleYearIsCorrupt:
+    """schedule_year_is_corrupt — the stale-cache corruption signature (FRE-147)."""
+
+    def _ingest_and_read(self, tmp_path, text, year):
+        """Round-trip a fixture body through ingest_rows + get_schedule."""
+        db = tmp_path / "sched.sqlite"
+        conn = sqlite3.connect(str(db))
+        si.ingest_rows(conn, year, si.parse_schedule_rows(text, year))
+        conn.close()
+        repo = LahmanRepository(str(db))
+        try:
+            return repo.get_schedule(year), repo
+        finally:
+            pass  # repo returned so the caller can also exercise repo methods
+
+    def test_empty_year_not_corrupt(self):
+        assert si.schedule_year_is_corrupt([]) is False
+
+    def test_corrupt_year_flagged(self, tmp_path):
+        # Simulate the pre-fix parse of a 13-column file: read the fixture with
+        # the OLD fixed-index behavior so the park code lands in postponed.
+        corrupt_body = (
+            'Date,Num,Day,Visitor,League,Game,Home,League,Game,Day/Night,Postponed,Makeup\n'
+            '"20240328","0","Thu","OAK","AL",1,"SEA","AL",1,"N","SEO01",""\n'
+            '"20240402","0","Tue","BOS","AL",1,"OAK","AL",1,"D","OAK01","Rain"\n'
+            '"20240615","0","Sat","SDN","NL",1,"CHN","NL",1,"D","TOK01","Hurricane"\n'
+        )
+        rows, repo = self._ingest_and_read(tmp_path, corrupt_body, 2024)
+        try:
+            assert all(r.postponed for r in rows)  # every row has a park code
+            assert si.schedule_year_is_corrupt(rows) is True
+            assert repo.schedule_needs_repair(2024) is True
+        finally:
+            repo.close()
+
+    def test_healthy_year_not_flagged(self, tmp_path):
+        # The 12-column fixture: two real postponed rows, the rest empty.
+        rows, repo = self._ingest_and_read(tmp_path, FIXTURE_SCHEDULE, 2016)
+        try:
+            assert si.schedule_year_is_corrupt(rows) is False
+            assert repo.schedule_needs_repair(2016) is False
+        finally:
+            repo.close()
+
+    def test_fixed_13col_parse_not_flagged(self, tmp_path):
+        # After the parser fix, a real 2024 file parses healthily and must NOT
+        # be flagged corrupt (only the genuinely postponed rows carry postponed).
+        rows, repo = self._ingest_and_read(tmp_path, FIXTURE_SCHEDULE_13COL, 2024)
+        try:
+            assert si.schedule_year_is_corrupt(rows) is False
+            assert repo.schedule_needs_repair(2024) is False
         finally:
             repo.close()
 
