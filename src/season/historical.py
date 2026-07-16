@@ -43,6 +43,16 @@ from typing import List, Optional, Tuple
 from src.season.schedule import ScheduledGame, SeasonDay
 from src.season.state import LeagueTeam, SeasonState
 
+# Season-shape thresholds for the degenerate-league guard (see
+# ``docs/specs/historical-season-shape-validation.md`` and the ADR-001 era
+# survey). Both are era-safe against the verified baselines: strike years
+# (1981/1994) retain ~0.66–0.71 of raw rows, and the shortest real seasons
+# (1877/2020) play ~57–60 games per team — each clears these floors with
+# margin, while the corrupt 2024 cache (~0.0004 retained, ~1 game/team) fails
+# all checks. Named constants so a future era can retune with a one-liner.
+MIN_GAME_RETENTION = 0.5  # played rows must be >= this fraction of raw rows
+MIN_GAMES_PER_TEAM = 40  # every team must play at least this many games
+
 
 class HistoricalSeasonError(ValueError):
     """A historical season could not be built from its schedule data.
@@ -65,6 +75,40 @@ class HistoricalSeasonError(ValueError):
         )
 
 
+class DegenerateHistoricalSeasonError(ValueError):
+    """The built season is structurally implausible (corrupt/partial schedule).
+
+    Distinct from :class:`HistoricalSeasonError` (which is a per-team
+    resolve/load failure): here the teams resolve fine but the surviving slate
+    is degenerate — entire teams missing, most games gone, or too few games per
+    team. **Not** a subclass of ``HistoricalSeasonError``, so the setup flow's
+    team-oriented handler does not mis-handle it; it **is** a ``ValueError``, so
+    the flow's existing ``except ValueError`` branch surfaces its message and
+    returns to the year picker.
+
+    ``reasons`` holds the human-readable descriptions of every failed shape
+    check; the message always leads with the raw-rows → playable-games headline
+    the issue asked for.
+    """
+
+    def __init__(
+        self,
+        year: int,
+        raw_rows: int,
+        played_games: int,
+        reasons: List[str],
+    ) -> None:
+        self.year = year
+        self.raw_rows = raw_rows
+        self.played_games = played_games
+        self.reasons = list(reasons)
+        super().__init__(
+            f"The {year} schedule looks corrupt: {raw_rows} scheduled row(s) "
+            f"but only {played_games} playable game(s) — "
+            f"{'; '.join(self.reasons)}. Re-fetch the schedule data."
+        )
+
+
 def _effective_date(row) -> Optional[int]:
     """The date a schedule row is actually played on, or ``None`` if cancelled.
 
@@ -79,8 +123,78 @@ def _effective_date(row) -> Optional[int]:
     return row.date
 
 
+def _validate_season_shape(year: int, rows, played) -> None:
+    """Refuse to build a degenerate season from a corrupt/partial slate.
+
+    Three era-safe checks, all relative to the year's own **raw** Retrosheet
+    ids and row counts (no Lahman resolution needed, so this runs before the
+    more expensive resolution/roster loads and its message takes precedence
+    over any incidental downstream failure):
+
+    1. **No whole team vanishes** — every team that appears in the raw rows also
+       appears in the played slate. A real season never cancels *every* game a
+       team plays; a team seen only in cancelled rows means the slate is corrupt.
+    2. **Game retention** — ``len(played) / len(rows) >= MIN_GAME_RETENTION``.
+    3. **Minimum per-team games** — every played team appears in at least
+       ``MIN_GAMES_PER_TEAM`` played rows.
+
+    Every failing check contributes a reason; the collected reasons are raised
+    once as a :class:`DegenerateHistoricalSeasonError` (mirroring how
+    ``HistoricalSeasonError`` reports all problem teams together).
+
+    Args:
+        year: The season year, for the error message.
+        rows: The raw schedule rows (every scheduled game, played or not).
+        played: The filtered ``(effective_date, row)`` slate.
+    """
+    reasons: List[str] = []
+
+    raw_teams = set()
+    for row in rows:
+        raw_teams.add(row.vis_team)
+        raw_teams.add(row.home_team)
+
+    played_teams = set()
+    per_team_games: dict = {}
+    for _effective, row in played:
+        for team in (row.vis_team, row.home_team):
+            played_teams.add(team)
+            per_team_games[team] = per_team_games.get(team, 0) + 1
+
+    # Check 1: no whole team vanishes (played_teams is always a subset of raw).
+    missing = raw_teams - played_teams
+    if missing:
+        reasons.append(
+            f"entire teams are missing ({len(raw_teams)} teams scheduled, "
+            f"only {len(played_teams)} play)"
+        )
+
+    # Check 2: game retention.
+    retention = len(played) / len(rows) if rows else 0.0
+    if retention < MIN_GAME_RETENTION:
+        reasons.append(
+            f"only {retention:.0%} of scheduled games survived "
+            f"(needs >= {MIN_GAME_RETENTION:.0%})"
+        )
+
+    # Check 3: minimum per-team games. Name the emptiest team for actionability.
+    if per_team_games:
+        thin_team = min(per_team_games, key=per_team_games.get)
+        thin_count = per_team_games[thin_team]
+        if thin_count < MIN_GAMES_PER_TEAM:
+            reasons.append(
+                f"the {thin_team} slate has just {thin_count} game(s) "
+                f"(needs >= {MIN_GAMES_PER_TEAM} per team)"
+            )
+
+    if reasons:
+        raise DegenerateHistoricalSeasonError(
+            year, len(rows), len(played), reasons
+        )
+
+
 def build_historical_season(
-    repo, year: int, user_team_key: Optional[str] = None
+    repo, year: int, user_team_key: Optional[str] = None, *, validate: bool = True
 ) -> SeasonState:
     """Build a :class:`SeasonState` for a full historical league on its schedule.
 
@@ -91,6 +205,11 @@ def build_historical_season(
         user_team_key: The ``"{team_id}-{year}"`` key of the team the user
             manages, or ``None`` for a watch-only (commissioner) season. Must be
             one of the resolved league teams if given.
+        validate: When ``True`` (default, production), the built slate is
+            shape-checked and a degenerate season (entire teams missing, most
+            games gone, or too few games per team — e.g. a corrupt/partial
+            schedule cache) is rejected. Pass ``False`` to skip the check for
+            deliberately tiny structural test fixtures.
 
     Returns:
         A ``SeasonState`` with a prebuilt schedule, ``games_per_opponent=None``,
@@ -99,6 +218,9 @@ def build_historical_season(
     Raises:
         ValueError: If the year has no schedule data (or none of its games were
             actually played).
+        DegenerateHistoricalSeasonError: If ``validate`` and the played slate
+            looks corrupt (lost a whole team, retained < 50% of raw rows, or
+            left any team < 40 games).
         HistoricalSeasonError: If any team id fails to resolve or load.
     """
     rows = repo.get_schedule(year)
@@ -115,6 +237,12 @@ def build_historical_season(
 
     if not played:
         raise ValueError(f"no played games in the {year} schedule")
+
+    # Shape gate: block a degenerate season before the (more expensive) team
+    # resolution below, so a data-corruption error takes precedence over any
+    # incidental downstream resolve failure. Uses only raw ids + row counts.
+    if validate:
+        _validate_season_shape(year, rows, played)
 
     # Step 3: resolve every Retrosheet id in the played slate to a Lahman key
     # and confirm each resolved team-season's roster loads. Failures are
@@ -266,6 +394,7 @@ def build_generated_historical_season(
     user_team_key: Optional[str] = None,
     *,
     seed: Optional[int] = None,
+    validate: bool = True,
 ) -> SeasonState:
     """Build a *generated* full-league season from a year's real structure.
 
@@ -286,6 +415,9 @@ def build_generated_historical_season(
             ``None`` for a watch-only season. Must be a resolved league team.
         seed: Shuffle seed; defaults to ``year`` so a given year reproducibly
             generates the same schedule. Exposed mainly for tests.
+        validate: Threaded into the inner :func:`build_historical_season` call
+            so the shape gate runs on the real played slate before the shuffle
+            (same games, so the re-ordered schedule needs no separate check).
 
     Returns:
         A ``SeasonState`` with a freshly ordered schedule, the same league (and
@@ -294,9 +426,13 @@ def build_generated_historical_season(
 
     Raises:
         ValueError: If the year has no schedule data (or none were played).
+        DegenerateHistoricalSeasonError: If ``validate`` and the played slate
+            looks corrupt (see :func:`build_historical_season`).
         HistoricalSeasonError: If any team id fails to resolve or load.
     """
-    base = build_historical_season(repo, year, user_team_key=user_team_key)
+    base = build_historical_season(
+        repo, year, user_team_key=user_team_key, validate=validate
+    )
     schedule = _shuffle_into_days(
         _matchups_of(base.schedule), seed=year if seed is None else seed
     )

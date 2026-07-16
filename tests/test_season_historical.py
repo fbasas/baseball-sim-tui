@@ -29,6 +29,9 @@ import pytest
 
 from src.data.models import ScheduleRow, TeamSeason
 from src.season.historical import (
+    MIN_GAME_RETENTION,
+    MIN_GAMES_PER_TEAM,
+    DegenerateHistoricalSeasonError,
     HistoricalSeasonError,
     build_historical_season,
 )
@@ -131,6 +134,80 @@ def standard_schedule():
     ]
 
 
+# --- Realistic-slate builders (for the season-shape validation tests) --------
+#
+# These synthesize slates the *shape* gate can judge: enough teams and enough
+# games per team to look like a real season (or, deliberately, not). They use
+# generic Retrosheet ids ``r0..rN`` mapped to Lahman ``R0..RN`` so a passing
+# slate also builds end-to-end.
+
+
+def round_robin(team_ids, rounds, start_date=19270401, cancelled=False):
+    """A circle-method schedule: every team plays exactly ``rounds`` games.
+
+    Each round pairs the teams up (one game per team) via the standard circle
+    rotation; every game gets its own date so nothing is read as a
+    doubleheader. With ``cancelled=True`` every row is a postponed-no-makeup
+    drop (contributes to the raw slate but never to the played slate). Requires
+    an even ``len(team_ids)``.
+    """
+    order = list(team_ids)
+    n = len(order)
+    rows = []
+    date = start_date
+    for _ in range(rounds):
+        for i in range(n // 2):
+            rows.append(
+                srow(
+                    date,
+                    0,
+                    order[i],
+                    order[n - 1 - i],
+                    postponed="rain" if cancelled else None,
+                )
+            )
+            date += 1
+        # Circle rotation: fix the first team, rotate the rest.
+        order = [order[0]] + [order[-1]] + order[1:-1]
+    return rows
+
+
+def team_ids(n):
+    """``["r0", "r1", ...]`` — n generic Retrosheet ids."""
+    return [f"r{i}" for i in range(n)]
+
+
+def realistic_repo(ids, rows):
+    """A ``FakeRepo`` whose metadata resolves every id in ``ids``.
+
+    ``rN`` -> Lahman ``RN``; leagues alternate AL/NL, no divisions. Lets a
+    slate that *passes* validation also build all the way to a ``SeasonState``.
+    """
+    retro_map = {t: t.upper() for t in ids}
+    team_meta = {
+        t.upper(): ("AL" if i % 2 == 0 else "NL", "")
+        for i, t in enumerate(ids)
+    }
+    rosters = {t.upper(): ["player"] for t in ids}
+    return FakeRepo(
+        rows, retro_map=retro_map, team_meta=team_meta, rosters=rosters
+    )
+
+
+def corrupt_2024_slate():
+    """The 2024 bug reproduced in miniature: 2430 raw rows, 1 playable game.
+
+    A full 30-team schedule where every game but one is cancelled — so 30 teams
+    are scheduled but only 2 ever play, retention is ~0.04%, and the surviving
+    team plays a single game. Trips all three shape checks at once.
+    """
+    ids = team_ids(30)
+    rows = round_robin(ids, 162, cancelled=True)  # 30/2 * 162 = 2430 rows
+    first = rows[0]  # r0 (vis) @ r29 (home) — flip it back to played
+    rows[0] = srow(first.date, 0, first.vis_team, first.home_team)
+    return ids, rows
+
+
 # --- Builder unit tests ------------------------------------------------------
 
 
@@ -145,25 +222,33 @@ class TestBuildHistoricalSeason:
             build_historical_season(FakeRepo(rows), YEAR)
 
     def test_day_count_drops_cancelled_and_moves_makeup(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         # 3 distinct effective dates: 04-01, 04-02, 04-05. The cancelled
         # 04-03 game and the emptied 04-04 date produce no SeasonDay.
         assert len(state.schedule) == 3
         assert [len(day) for day in state.schedule] == [2, 2, 2]
 
     def test_day_equals_list_index(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         for index, day in enumerate(state.schedule):
             for game in day:
                 assert game.day == index
 
     def test_game_ids_sequential_in_play_order(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         ids = [g.game_id for day in state.schedule for g in day]
         assert ids == [0, 1, 2, 3, 4, 5]
 
     def test_doubleheader_is_two_games_same_day_same_teams(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         day1 = state.schedule[1]  # 19270402
         assert len(day1) == 2
         # Both games are TC (home) vs TA (away) — a doubleheader.
@@ -171,14 +256,18 @@ class TestBuildHistoricalSeason:
         assert all(g.away_key == "TA-1927" for g in day1)
 
     def test_cancelled_game_absent(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         # The dropped 04-03 game was TB (home) vs TD (away): never scheduled.
         for day in state.schedule:
             for g in day:
                 assert not (g.home_key == "TB-1927" and g.away_key == "TD-1927")
 
     def test_makeup_game_lands_on_makeup_day(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         day2 = state.schedule[2]  # effective date 19270405
         # The moved game (rB@rC -> TC home / TB away) shares day 2 with the
         # already-scheduled rD@rA (TA home / TD away) — a makeup doubleheader.
@@ -187,13 +276,17 @@ class TestBuildHistoricalSeason:
         assert ("TA-1927", "TD-1927") in pairs  # the regularly scheduled game
 
     def test_home_away_from_fields(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         first = state.schedule[0][0]  # rA (vis) @ rB (home)
         assert first.home_key == "TB-1927"
         assert first.away_key == "TA-1927"
 
     def test_league_teams_carry_league_and_division(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         by_key = {t.key: t for t in state.teams}
         assert set(by_key) == {"TA-1927", "TB-1927", "TC-1927", "TD-1927"}
         assert by_key["TA-1927"].league == "AL"
@@ -204,23 +297,33 @@ class TestBuildHistoricalSeason:
         assert by_key["TA-1927"].display_name == "TA Club"
 
     def test_games_per_opponent_is_none(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         assert state.games_per_opponent is None
 
     def test_user_team_key_accepted(self):
         state = build_historical_season(
-            FakeRepo(standard_schedule()), YEAR, user_team_key="TA-1927"
+            FakeRepo(standard_schedule()),
+            YEAR,
+            user_team_key="TA-1927",
+            validate=False,
         )
         assert state.user_team_key == "TA-1927"
 
     def test_watch_only_user_team_is_none(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         assert state.user_team_key is None
 
     def test_unknown_user_team_key_rejected(self):
         with pytest.raises(ValueError, match="not a league team"):
             build_historical_season(
-                FakeRepo(standard_schedule()), YEAR, user_team_key="ZZZ-1927"
+                FakeRepo(standard_schedule()),
+                YEAR,
+                user_team_key="ZZZ-1927",
+                validate=False,
             )
 
 
@@ -230,7 +333,9 @@ class TestBuildFailures:
         del retro_map["rD"]  # rD no longer resolves
         with pytest.raises(HistoricalSeasonError) as exc:
             build_historical_season(
-                FakeRepo(standard_schedule(), retro_map=retro_map), YEAR
+                FakeRepo(standard_schedule(), retro_map=retro_map),
+                YEAR,
+                validate=False,
             )
         assert exc.value.year == YEAR
         assert any("rD" in p for p in exc.value.problem_teams)
@@ -240,7 +345,9 @@ class TestBuildFailures:
         del team_meta["TC"]  # resolves, but no Teams row
         with pytest.raises(HistoricalSeasonError) as exc:
             build_historical_season(
-                FakeRepo(standard_schedule(), team_meta=team_meta), YEAR
+                FakeRepo(standard_schedule(), team_meta=team_meta),
+                YEAR,
+                validate=False,
             )
         assert any("TC" in p for p in exc.value.problem_teams)
 
@@ -249,7 +356,9 @@ class TestBuildFailures:
         rosters["TB"] = []  # resolves + has a Teams row, but no roster
         with pytest.raises(HistoricalSeasonError) as exc:
             build_historical_season(
-                FakeRepo(standard_schedule(), rosters=rosters), YEAR
+                FakeRepo(standard_schedule(), rosters=rosters),
+                YEAR,
+                validate=False,
             )
         assert any("TB" in p for p in exc.value.problem_teams)
 
@@ -264,9 +373,154 @@ class TestBuildFailures:
                     standard_schedule(), retro_map=retro_map, rosters=rosters
                 ),
                 YEAR,
+                validate=False,
             )
         problems = " ".join(exc.value.problem_teams)
         assert "rD" in problems and "TB" in problems
+
+
+# --- Season-shape validation (degenerate-league guard, FRE-149) --------------
+
+
+class TestSeasonShapeValidationRejects:
+    """Slates that fail one or more shape checks are blocked at build time."""
+
+    def test_corrupt_2024_slate_rejected_with_all_reasons(self):
+        ids, rows = corrupt_2024_slate()
+        with pytest.raises(DegenerateHistoricalSeasonError) as exc:
+            # Built as "2024" so the message names the real year of the bug;
+            # validation runs on raw ids/counts, before any team resolution.
+            build_historical_season(realistic_repo(ids, rows), 2024)
+        err = exc.value
+        # Headline numbers the issue asked for.
+        assert err.year == 2024
+        assert err.raw_rows == 2430
+        assert err.played_games == 1
+        assert "2430 scheduled row(s)" in str(err)
+        assert "only 1 playable game(s)" in str(err)
+        assert "Re-fetch the schedule data." in str(err)
+        # All three checks fire and are collected together.
+        assert len(err.reasons) == 3
+        joined = " ".join(err.reasons)
+        assert "teams are missing" in joined  # check 1
+        assert "survived" in joined  # check 2
+        assert "per team" in joined  # check 3
+
+    def test_vanished_team_rejected(self):
+        # Six teams play a healthy 50-game slate; a seventh (r6) appears only
+        # in cancelled rows. Retention and per-team both pass, so only the
+        # missing-team check fires.
+        ids = team_ids(6)
+        rows = round_robin(ids, 50)  # 6 teams, 50 games each, all played
+        ghost = [
+            srow(19280401 + i, 0, "r6", ids[i % 6], postponed="rain")
+            for i in range(10)
+        ]
+        with pytest.raises(DegenerateHistoricalSeasonError) as exc:
+            build_historical_season(FakeRepo(rows + ghost), YEAR)
+        assert exc.value.reasons == [
+            "entire teams are missing (7 teams scheduled, only 6 play)"
+        ]
+
+    def test_low_retention_rejected(self):
+        # All six teams play (no vanish) 50 games each, but more than half the
+        # raw slate is cancelled — only the retention check fires.
+        ids = team_ids(6)
+        played = round_robin(ids, 50)  # 300 rows
+        cancelled = round_robin(
+            ids, 120, start_date=19290401, cancelled=True
+        )  # 360 rows -> retention 300/660 ≈ 0.45
+        rows = played + cancelled
+        with pytest.raises(DegenerateHistoricalSeasonError) as exc:
+            build_historical_season(FakeRepo(rows), YEAR)
+        assert len(exc.value.reasons) == 1
+        reason = exc.value.reasons[0]
+        assert "survived" in reason and ">= 50%" in reason
+
+    def test_thin_per_team_rejected(self):
+        # Four core teams play a full 50-game round robin; a fifth/sixth team
+        # (r4, r5) play only 30 games against each other. Retention is 100% and
+        # no team vanishes, so only the per-team floor fires.
+        core = round_robin(team_ids(4), 50)  # r0..r3, 50 games each
+        thin = [srow(19280401 + i, 0, "r4", "r5") for i in range(30)]
+        with pytest.raises(DegenerateHistoricalSeasonError) as exc:
+            build_historical_season(FakeRepo(core + thin), YEAR)
+        assert len(exc.value.reasons) == 1
+        reason = exc.value.reasons[0]
+        assert "30 game(s)" in reason and "per team" in reason
+        assert ("r4" in reason) or ("r5" in reason)
+
+    def test_is_a_value_error_but_not_historical_season_error(self):
+        # Setup-flow contract: the flow's `except ValueError` branch surfaces
+        # this error and returns to the year picker, while its earlier
+        # `except HistoricalSeasonError` (team-oriented) does NOT catch it.
+        ids, rows = corrupt_2024_slate()
+        with pytest.raises(ValueError):
+            build_historical_season(FakeRepo(rows), 2024)
+        try:
+            build_historical_season(FakeRepo(rows), 2024)
+        except DegenerateHistoricalSeasonError as exc:
+            assert isinstance(exc, ValueError)
+            assert not isinstance(exc, HistoricalSeasonError)
+
+    def test_validate_false_skips_the_gate(self):
+        # The escape hatch the structural tests rely on: a degenerate slate
+        # builds without complaint when validation is turned off.
+        ids, rows = corrupt_2024_slate()
+        state = build_historical_season(
+            realistic_repo(ids, rows), 2024, validate=False
+        )
+        assert len(state.schedule) >= 1
+
+
+class TestSeasonShapeValidationAccepts:
+    """Realistic slates mirroring the verified era baselines pass the gate."""
+
+    def test_clean_full_season_passes(self):
+        # 16 teams × 154 games, 5 cancelled → ~99.6% retained (1927-like). The
+        # cancelled games are spread over distinct rows, so no team vanishes and
+        # every team stays far above the per-team floor.
+        ids = team_ids(16)
+        rows = round_robin(ids, 154)  # 16/2 * 154 = 1232 rows
+        for i in range(5):
+            r = rows[i]
+            rows[i] = srow(r.date, 0, r.vis_team, r.home_team, postponed="rain")
+        state = build_historical_season(realistic_repo(ids, rows), YEAR)
+        assert len(state.teams) == 16
+
+    def test_strike_year_retention_passes(self):
+        # ~66% retention (1981/1994-like): all teams play, a third of games
+        # cancelled — clears the 50% floor with margin.
+        ids = team_ids(8)
+        played = round_robin(ids, 100)  # 400 rows
+        cancelled = round_robin(
+            ids, 50, start_date=19290401, cancelled=True
+        )  # 200 rows -> retention 400/600 ≈ 0.667
+        state = build_historical_season(
+            realistic_repo(ids, played + cancelled), YEAR
+        )
+        assert len(state.teams) == 8
+
+    def test_short_60_game_season_passes(self):
+        # ~60 games/team (2020 COVID-like) — above the 40 floor.
+        ids = team_ids(10)
+        played = round_robin(ids, 60)
+        state = build_historical_season(realistic_repo(ids, played), YEAR)
+        assert len(state.teams) == 10
+
+    def test_six_team_league_passes(self):
+        # Proves there is no absolute league-size floor: the smallest real
+        # league (1877/1878 NL, 6 teams) must build.
+        ids = team_ids(6)
+        played = round_robin(ids, 60)
+        state = build_historical_season(realistic_repo(ids, played), YEAR)
+        assert len(state.teams) == 6
+
+    def test_thresholds_are_named_constants(self):
+        # The spec pins these as tunable module constants; guard the values so
+        # a silent retune is caught.
+        assert MIN_GAME_RETENTION == 0.5
+        assert MIN_GAMES_PER_TEAM == 40
 
 
 # --- Model round-trip tests --------------------------------------------------
@@ -274,7 +528,9 @@ class TestBuildFailures:
 
 class TestModelRoundTrip:
     def test_from_schedule_round_trips_through_json(self):
-        state = build_historical_season(FakeRepo(standard_schedule()), YEAR)
+        state = build_historical_season(
+            FakeRepo(standard_schedule()), YEAR, validate=False
+        )
         restored = SeasonState.from_dict(json.loads(json.dumps(state.to_dict())))
         assert restored.games_per_opponent is None
         assert restored.teams == state.teams

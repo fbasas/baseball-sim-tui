@@ -42,7 +42,10 @@ from src.tui.historical_setup_flow import HistoricalSeasonSetupFlow
 from src.tui.screens.choice_screen import ChoiceScreen
 import src.tui.historical_setup_flow as historical_flow_module
 import src.tui.schedule_ingest_pass as pass_module
-from src.season.historical import HistoricalSeasonError
+from src.season.historical import (
+    DegenerateHistoricalSeasonError,
+    HistoricalSeasonError,
+)
 
 
 YEAR = 1927
@@ -478,6 +481,31 @@ def test_team_load_failure_names_team_and_reprompts_year(monkeypatch, tmp_path):
 
     error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
     assert error_notes and "1927 TC Club" in error_notes[-1]
+    assert app.last_screen._title == "⚾ HISTORICAL SEASON"
+    assert "controller" not in captured
+
+
+def test_degenerate_season_reprompts_year(monkeypatch, tmp_path):
+    # FRE-149: the builder's new DegenerateHistoricalSeasonError is a
+    # ValueError (not a HistoricalSeasonError), so the flow's existing
+    # `except ValueError` branch surfaces its message verbatim and returns to
+    # the year picker — no setup-flow source change required.
+    _install_team_loader(monkeypatch)
+    err = DegenerateHistoricalSeasonError(
+        2024, 2430, 1, ["entire teams are missing (30 teams scheduled, only 2 play)"]
+    )
+    _install_builder(monkeypatch, raises=err)
+    app, captured = FakeApp(), {}
+    flow = _make_flow(app, _repo(), tmp_path, captured)
+    flow.begin()
+    app.last_callback(str(YEAR))
+    app.last_callback("actual")
+
+    error_notes = [msg for msg, kw in app.notes if kw.get("severity") == "error"]
+    assert error_notes and str(err) == error_notes[-1]
+    assert "2430 scheduled row(s)" in error_notes[-1]
+    # Back at the year picker, not the your-team screen.
+    assert isinstance(app.last_screen, ChoiceScreen)
     assert app.last_screen._title == "⚾ HISTORICAL SEASON"
     assert "controller" not in captured
 
