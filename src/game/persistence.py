@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
 from src.game.team import Lineup, Team
+from src.manager.batter_rest import BatterUsageLedger
 from src.manager.rest import RestLedger
 from src.season.state import SeasonState
 from src.season.stats import SeasonStats
@@ -571,11 +572,12 @@ class SeasonSnapshot:
     Mirrors :class:`SeriesSnapshot` at season scale: the :class:`SeasonState`
     (league config, schedule, and the recorded ``results`` from which
     standings / current day / champion all derive), the :class:`SeasonStats`
-    accumulator, and one :class:`RestLedger` per team key governing pitcher
-    availability across the whole schedule. The loaded ``Team``s and manager
-    contexts live only on the running controller and are re-hydrated from the
-    team keys on load (``src.season.rehydrate.rehydrate_season_teams``), so
-    they are never serialized here.
+    accumulator, one :class:`RestLedger` per team key governing pitcher
+    availability, and one :class:`BatterUsageLedger` per team key governing
+    batter rest/rotation across the whole schedule. The loaded ``Team``s and
+    manager contexts live only on the running controller and are re-hydrated
+    from the team keys on load (``src.season.rehydrate.rehydrate_season_teams``),
+    so they are never serialized here.
 
     :meth:`from_controller` / :meth:`to_controller` bridge to the app-level
     :class:`~src.season.controller.SeasonController`. As with a series, the
@@ -587,6 +589,7 @@ class SeasonSnapshot:
     state: SeasonState
     stats: SeasonStats
     ledgers: Dict[str, RestLedger]
+    batter_ledgers: Dict[str, BatterUsageLedger] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -594,6 +597,10 @@ class SeasonSnapshot:
             "stats": self.stats.to_dict(),
             "ledgers": {
                 key: ledger.to_dict() for key, ledger in self.ledgers.items()
+            },
+            "batter_ledgers": {
+                key: ledger.to_dict()
+                for key, ledger in self.batter_ledgers.items()
             },
         }
 
@@ -605,6 +612,13 @@ class SeasonSnapshot:
             ledgers={
                 key: RestLedger.from_dict(led)
                 for key, led in data["ledgers"].items()
+            },
+            # Additive (FRE-177): a pre-batter-ledger season save has no
+            # "batter_ledgers" key — default to empty (no rest recorded), so an
+            # older save still loads and simply resumes with no batter rest.
+            batter_ledgers={
+                key: BatterUsageLedger.from_dict(led)
+                for key, led in data.get("batter_ledgers", {}).items()
             },
         )
 
@@ -621,6 +635,7 @@ class SeasonSnapshot:
             state=controller.state,
             stats=controller.stats,
             ledgers=controller.ledgers,
+            batter_ledgers=controller.batter_ledgers,
         )
 
     def to_controller(self, teams, contexts) -> "SeasonController":
@@ -628,10 +643,11 @@ class SeasonSnapshot:
 
         ``teams`` / ``contexts`` are the per-key maps re-hydrated from the saved
         team keys (see ``src.season.rehydrate.rehydrate_season_teams``); the
-        restored ``state`` (schedule + results ⇒ standings), ``stats``, and
-        ``ledgers`` are installed so a resumed season continues from
-        ``current_day`` with rest availability, standings, and leaderboards
-        intact. Imported lazily because ``SeasonController`` imports this module.
+        restored ``state`` (schedule + results ⇒ standings), ``stats``,
+        ``ledgers``, and ``batter_ledgers`` are installed so a resumed season
+        continues from ``current_day`` with pitcher rest, batter rest/rotation,
+        standings, and leaderboards intact. Imported lazily because
+        ``SeasonController`` imports this module.
         """
         from src.season.controller import SeasonController
 
@@ -641,6 +657,7 @@ class SeasonSnapshot:
             contexts=contexts,
             stats=self.stats,
             ledgers=self.ledgers,
+            batter_ledgers=self.batter_ledgers,
         )
 
 

@@ -52,6 +52,11 @@ class AutoGameResult:
     home_pitcher_outs: Dict[str, int] = field(default_factory=dict)
     away_starter: str = ""
     home_starter: str = ""
+    # The 9 starting batter ids per side (each pregame plan's batting_order),
+    # recorded into the season's BatterUsageLedger so regulars rest and backups
+    # start across the schedule (FRE-177). Parallels *_workloads for pitchers.
+    away_batter_starts: List[str] = field(default_factory=list)
+    home_batter_starts: List[str] = field(default_factory=list)
     decisions: List[DecisionEvent] = field(default_factory=list)
     # Per-game box score (batting/pitching lines, linescore) — FRE-90. Filled
     # via the same engine-level accumulator the interactive screen uses, so
@@ -90,6 +95,8 @@ def play_ai_game(
         away_score=0, home_score=0, innings=0,
         away_starter=away_plan.starting_pitcher,
         home_starter=home_plan.starting_pitcher,
+        away_batter_starts=list(away_plan.batting_order),
+        home_batter_starts=list(home_plan.batting_order),
         box_score=box,
     )
     runs_allowed: Dict[str, int] = {}

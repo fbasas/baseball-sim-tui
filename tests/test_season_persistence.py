@@ -80,6 +80,14 @@ def make_season_controller() -> SeasonController:
     )
     controller.ledgers[game.away_key].record(game.day, {"a_ace": 30})
     controller.ledgers[game.home_key].record(game.day, {"h_ace": 27})
+    # Batter usage/rest ledgers carry the day's starting nine per side (FRE-177),
+    # so the snapshot has real batter-rest state to round-trip too.
+    controller.batter_ledgers[game.away_key].record(
+        game.day, [f"a_bat{i}" for i in range(9)]
+    )
+    controller.batter_ledgers[game.home_key].record(
+        game.day, [f"h_bat{i}" for i in range(9)]
+    )
     controller.stats.ingest(
         make_box_score(), home_key=game.home_key, away_key=game.away_key
     )
@@ -140,6 +148,12 @@ class TestSeasonSnapshotRoundTrip:
         # Every rest ledger survives with int day keys intact.
         for key in controller.state.team_keys:
             assert restored.ledgers[key].outings == controller.ledgers[key].outings
+        # Every batter usage/rest ledger survives with int day keys intact.
+        for key in controller.state.team_keys:
+            assert (
+                restored.batter_ledgers[key].starts
+                == controller.batter_ledgers[key].starts
+            )
 
     def test_in_progress_game_is_not_in_results(self):
         """from_controller captures only recorded games; a mid-game save's
@@ -147,6 +161,15 @@ class TestSeasonSnapshotRoundTrip:
         controller = make_season_controller()  # 1 game recorded
         snap = SeasonSnapshot.from_controller(controller)
         assert len(snap.state.results) == 1
+
+    def test_pre_batter_ledger_save_loads_with_empty_batter_ledgers(self):
+        """A season save written before FRE-177 has no ``batter_ledgers`` key;
+        it must still load, defaulting to empty batter ledgers (no rest), so an
+        older save resumes cleanly."""
+        data = make_season_snapshot().to_dict()
+        del data["batter_ledgers"]
+        restored = SeasonSnapshot.from_dict(data)
+        assert restored.batter_ledgers == {}
 
 
 # --- SeasonController bridge (the cross-game carryover) ----------------------
@@ -168,6 +191,10 @@ class TestControllerBridge:
         assert restored.stats.to_dict() == original.stats.to_dict()
         for key in original.state.team_keys:
             assert restored.ledgers[key].outings == original.ledgers[key].outings
+            assert (
+                restored.batter_ledgers[key].starts
+                == original.batter_ledgers[key].starts
+            )
 
     def test_ledger_rest_rule_survives_restore(self):
         """Rest availability (what the ledger governs) is identical pre/post

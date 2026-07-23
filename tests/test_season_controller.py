@@ -13,6 +13,7 @@ factory shape.
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Dict
 
 import pytest
 
@@ -20,6 +21,7 @@ import src.season.controller as controller_mod
 from src.game.autoplay import AutoGameResult
 from src.game.manager_adapter import TeamManagerContext
 from src.game.persistence import BoxScore
+from src.manager.batter_rest import BatterUsageLedger
 from src.manager.rest import RestLedger
 from src.manager.roles import PitcherRoleCard, PitcherRoleType
 from src.season.controller import SeasonController
@@ -53,6 +55,11 @@ def reliever(key: str) -> str:
 
 def batter(key: str) -> str:
     return f"{key}-BAT"
+
+
+def batter_starts(key: str) -> list:
+    """A deterministic 9-man starting lineup id list for a team."""
+    return [f"{key}-B{i}" for i in range(9)]
 
 
 def _bat(**over: int) -> dict:
@@ -105,6 +112,8 @@ def make_result(away_key: str, home_key: str, ace_bf: int = ACE_BF) -> AutoGameR
         home_workloads={ace(home_key): ace_bf, reliever(home_key): 6},
         away_starter=ace(away_key),
         home_starter=ace(home_key),
+        away_batter_starts=batter_starts(away_key),
+        home_batter_starts=batter_starts(home_key),
         box_score=box,
     )
 
@@ -153,6 +162,15 @@ class TestConstruction:
         assert len(c.games_for_day(0)) == 2  # 4 teams → 2 games/day
         assert c.games_for_day(-1) == []
         assert c.games_for_day(999) == []
+
+    def test_fresh_batter_ledger_per_team(self):
+        c = build_controller()
+        assert set(c.batter_ledgers) == set(STRENGTH)
+        assert all(
+            isinstance(led, BatterUsageLedger)
+            for led in c.batter_ledgers.values()
+        )
+        assert all(led.starts == {} for led in c.batter_ledgers.values())
 
 
 # --- Full season sims to completion -----------------------------------------
@@ -234,6 +252,62 @@ class TestRestCarryover:
         assert not led.is_available(card, today=1)
         assert not led.is_available(card, today=4)
         assert led.is_available(card, today=5)
+
+    def test_batter_starts_are_recorded_into_each_teams_batter_ledger(self, monkeypatch):
+        """Both teams' starting nine flow into their own batter usage ledgers by
+        the game's day — the parallel of the pitcher-workload recording (FRE-177)."""
+        monkeypatch.setattr(controller_mod, "play_ai_game", fake_play_ai_game())
+        c = build_controller()
+        c.sim_day(0)
+        for game in c.games_for_day(0):
+            for key in (game.away_key, game.home_key):
+                led = c.batter_ledgers[key]
+                assert set(led.starts) == set(batter_starts(key))
+                assert all(led.started_on(pid, 0) for pid in batter_starts(key))
+
+    def test_sim_game_syncs_context_batter_ledger(self, monkeypatch):
+        """sim_game installs each side's batter ledger onto its context before the
+        game, so ai_pregame's rest decisions read the season-scoped history."""
+        monkeypatch.setattr(controller_mod, "play_ai_game", fake_play_ai_game())
+        c = build_controller()
+        game = c.games_for_day(0)[0]
+        c.sim_game(game)
+        assert c.contexts[game.away_key].batter_ledger is c.batter_ledgers[game.away_key]
+        assert c.contexts[game.home_key].batter_ledger is c.batter_ledgers[game.home_key]
+
+    def test_user_game_records_batter_starts_from_payload(self, monkeypatch):
+        """record_user_game reads the starting nine from the GameScreen payload,
+        recording batter usage byte-identically to a simmed game."""
+        c = build_controller()
+        game = c.games_for_day(0)[0]
+        res = make_result(game.away_key, game.home_key)
+        c.record_user_game(game, {
+            "away_score": res.away_score,
+            "home_score": res.home_score,
+            "away_workloads": res.away_workloads,
+            "home_workloads": res.home_workloads,
+            "away_batter_starts": res.away_batter_starts,
+            "home_batter_starts": res.home_batter_starts,
+            "box_score": res.box_score,
+        })
+        for key in (game.away_key, game.home_key):
+            assert set(c.batter_ledgers[key].starts) == set(batter_starts(key))
+
+    def test_user_game_without_batter_starts_keys_records_no_rest(self, monkeypatch):
+        """An older GameScreen payload lacking the batter-starts keys records no
+        batter usage (defaults empty) rather than raising."""
+        c = build_controller()
+        game = c.games_for_day(0)[0]
+        res = make_result(game.away_key, game.home_key)
+        c.record_user_game(game, {
+            "away_score": res.away_score,
+            "home_score": res.home_score,
+            "away_workloads": res.away_workloads,
+            "home_workloads": res.home_workloads,
+            "box_score": res.box_score,
+        })
+        for key in (game.away_key, game.home_key):
+            assert c.batter_ledgers[key].starts == {}
 
     def test_each_teams_rest_is_tracked_in_its_own_ledger(self, monkeypatch):
         monkeypatch.setattr(controller_mod, "play_ai_game", fake_play_ai_game())
@@ -471,3 +545,156 @@ class TestRealSeasonIntegration:
                 assert available != set(card.pitchers), (
                     f"{key} has its full staff available the day after a game"
                 )
+
+
+@pytest.mark.skipif(
+    not LAHMAN_DB_PATH.exists(),
+    reason=f"Lahman database not found at {LAHMAN_DB_PATH}",
+)
+class TestRealSeasonBatterRotation:
+    """The FRE-177 definition of done, on a real 4-team season through the live
+    ``play_ai_game``: regulars rest, backups start, lineups vary game to game,
+    the season completes, and the batter ledgers round-trip through a save.
+
+    A longer schedule (``games_per_opponent=10`` → 30 games per team) is used so
+    that even heavy-usage regulars accrue enough consecutive starts to hit their
+    usage-derived rest threshold. Batter-rest selection is a pure function of the
+    role cards, schedule, and recorded start history — it never reads at-bat RNG
+    — so every assertion below is deterministic even though ``play_ai_game`` runs
+    unseeded.
+    """
+
+    def _build(self):
+        from src.data.lahman import LahmanRepository
+        from src.game.team import Team
+        from src.manager.inference import build_role_card
+        from src.manager.manager import ManagerAI
+        from src.manager.roles import BatterRoleType
+
+        repo = LahmanRepository(str(LAHMAN_DB_PATH))
+        specs = [("NYA", 1927), ("CHN", 2016), ("BOS", 1975), ("CIN", 1975)]
+        league, teams, contexts, regulars = [], {}, {}, {}
+        try:
+            for team_id, year in specs:
+                team = Team.load_from_repository(repo, team_id, year)
+                card = build_role_card(
+                    repo.get_team_season(team_id, year), team.roster,
+                    team.batting_stats, team.pitching_stats,
+                    repo.get_appearances(team_id, year),
+                )
+                key = f"{team_id}-{year}"
+                league.append(LeagueTeam(team_id, year, f"{year} {team_id}"))
+                teams[key] = team
+                contexts[key] = TeamManagerContext(manager=ManagerAI(card))
+                regulars[key] = [
+                    pid for pid, b in card.batters.items()
+                    if b.role == BatterRoleType.REGULAR
+                ]
+        finally:
+            repo.close()
+        state = SeasonState.create(league, 10, user_team_key=None)
+        controller = SeasonController(state, teams, contexts)
+        return controller, regulars
+
+    @staticmethod
+    def _games_by_team(controller) -> Dict[str, int]:
+        counts: Dict[str, int] = {k: 0 for k in controller.state.team_keys}
+        for r in controller.state.results:
+            counts[r.home_key] += 1
+            counts[r.away_key] += 1
+        return counts
+
+    @staticmethod
+    def _daily_lineups(ledger) -> Dict[int, frozenset]:
+        """day -> the set of batter ids that started that day, from the ledger."""
+        by_day: Dict[int, set] = {}
+        for pid, days in ledger.starts.items():
+            for day in days:
+                by_day.setdefault(day, set()).add(pid)
+        return {day: frozenset(ids) for day, ids in by_day.items()}
+
+    def test_season_completes_and_lineups_vary_with_rested_regulars(self):
+        controller, regulars = self._build()
+        # (c) The whole season sims to completion. A PA-cap failure would raise a
+        # RuntimeError out of sim_game, so simply finishing the loop proves it.
+        while not controller.is_complete:
+            controller.sim_day()
+        scheduled = [g.game_id for day in controller.state.schedule for g in day]
+        assert sorted(r.game_id for r in controller.state.results) == sorted(scheduled)
+
+        games = self._games_by_team(controller)
+        any_team_varied = False
+        for key in controller.state.team_keys:
+            ledger = controller.batter_ledgers[key]
+            team = controller.teams[key]
+            manager = controller.contexts[key].manager
+
+            # (a) Lineup variation: this team did not field one fixed nine.
+            distinct = set(self._daily_lineups(ledger).values())
+            if len(distinct) > 1:
+                any_team_varied = True
+
+            # (b) Backups start: at least one non-regular accrued a start.
+            reg_set = set(regulars[key])
+            backups_started = [
+                pid for pid, days in ledger.starts.items()
+                if pid not in reg_set and days
+            ]
+            assert backups_started, f"{key}: no backup ever started"
+
+            # (b) Regulars rest: at least one regular started fewer than every
+            # game, and — the faithful, achievable form of "every regular rests"
+            # — the only regulars who started every game are those the manager
+            # cannot bench without breaking the nine (no eligible, stats-present
+            # replacement at their position). The spec's "never break the nine"
+            # feasibility rule makes an everyday player at a thin position
+            # structurally unrestable; every regular who *can* be spared rests.
+            rested = [
+                pid for pid in regulars[key]
+                if len(ledger.starts.get(pid, {})) < games[key]
+            ]
+            assert rested, f"{key}: no regular ever got a rest day"
+            base_unavailable = [
+                pid for pid in manager.card.batters
+                if pid not in team.batting_stats
+            ]
+            available_pitchers = sorted(team.pitching_stats)
+            for pid in regulars[key]:
+                if len(ledger.starts.get(pid, {})) < games[key]:
+                    continue  # this regular rested — fine
+                # Never rested: prove he is irreplaceable at his position.
+                try:
+                    manager.build_pregame(
+                        available_pitchers=available_pitchers,
+                        unavailable_batters=base_unavailable + [pid],
+                    )
+                except ValueError:
+                    continue  # cannot field nine without him — expected
+                raise AssertionError(
+                    f"{key}: regular {pid} started every game yet a legal lineup "
+                    f"exists without him — he should have been rested"
+                )
+
+        assert any_team_varied, "no team's starting lineup varied across the season"
+
+    def test_batter_ledgers_round_trip_through_a_season_snapshot(self):
+        from src.game.persistence import SeasonSnapshot
+
+        controller, _ = self._build()
+        # Sim part of the season so the batter ledgers carry real start history.
+        controller.sim_day(0)
+        controller.sim_day(1)
+
+        # (d) from_controller → to_dict → from_dict → to_controller preserves the
+        # per-team batter ledgers exactly.
+        snap = SeasonSnapshot.from_controller(controller)
+        restored = SeasonSnapshot.from_dict(snap.to_dict()).to_controller(
+            teams=controller.teams, contexts=controller.contexts
+        )
+        assert set(restored.batter_ledgers) == set(controller.batter_ledgers)
+        for key in controller.batter_ledgers:
+            assert (
+                restored.batter_ledgers[key].starts
+                == controller.batter_ledgers[key].starts
+            )
+            assert restored.batter_ledgers[key].starts, f"{key}: empty after sim"
