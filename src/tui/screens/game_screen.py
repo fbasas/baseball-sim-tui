@@ -40,7 +40,7 @@ from src.tui.game_config import GameConfig
 from src.simulation.engine import AtBatResult
 from src.simulation.outcomes import AtBatOutcome
 
-from src.game.manager_adapter import TeamManagerContext, ai_pregame, build_view
+from src.game.manager_adapter import TeamManagerContext, ai_pregame, build_view, resolve_ai_starter
 from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget, FatigueWidget
 from .substitution_menu import SubstitutionMenu
 
@@ -578,6 +578,47 @@ class GameScreen(Screen):
         """
         self._box = box.copy()
 
+    def _starter_hand(
+        self,
+        team: Optional[Team],
+        ctx: Optional[TeamManagerContext],
+        pitcher_id: Optional[str],
+    ) -> Optional[str]:
+        """A side's starting pitcher's throwing hand (``"L"``/``"R"``), or None.
+
+        Resolved for *either* dugout kind so the opponent can platoon against it
+        (FRE-182), mirroring headless ``_starter_throws``:
+
+        - **AI side** (``ctx`` set): the manager's deterministic starter pick
+          (``resolve_ai_starter``, re-picked identically by ``ai_pregame``),
+          read from its role card — exactly as headless ``play_ai_game`` does.
+        - **Human side** (``ctx`` is None): the already-chosen ``pitcher_id``,
+          whose hand comes from ``PlayerInfo`` (the human dugout carries no role
+          card) — the team roster first, then the repo as a fallback.
+
+        Anything other than ``"L"``/``"R"`` yields None, so the opposing lineup
+        keeps its historical order rather than guessing a platoon edge.
+        """
+        if ctx is not None:
+            if team is None:
+                return None
+            try:
+                pid = resolve_ai_starter(team, ctx)
+            except ValueError:
+                return None
+            card = ctx.card.pitchers.get(pid)
+            throws = card.metrics.get("throws") if card else None
+            return throws if throws in ("L", "R") else None
+        # Human side: no role card, so the hand comes from PlayerInfo.
+        if pitcher_id is None:
+            return None
+        player = team.get_player(pitcher_id) if team is not None else None
+        throws = player.throws if player is not None else None
+        if throws not in ("L", "R") and self.repo is not None:
+            info = self.repo.get_player_info(pitcher_id)
+            throws = info.throws if info is not None else None
+        return throws if throws in ("L", "R") else None
+
     def _build_lineups(self) -> None:
         """Build both lineups: manager AI for its sides, heuristic otherwise.
 
@@ -594,15 +635,32 @@ class GameScreen(Screen):
         plan is materialized on *every* call, replay (``_reset_game``) restores
         the manual lineup with any in-game pinch-hitters undone — the plan is
         never mutated in place.
+
+        Platoon (FRE-182): each AI-managed side is built platoon-aware against
+        the opposing starter's throwing hand (``opposing_throws``), resolved by
+        ``_starter_hand`` for the human and AI-vs-AI cases alike. This matches
+        headless ``play_ai_game``; the platoon selection itself lives in
+        ``build_pregame`` (FRE-178) and is untouched here.
         """
         self._pregame_notes: List[Tuple[str, str]] = []
+        # Resolve each side's starting hand up front — before either lineup is
+        # built — so an AI-managed side platoons against its *opponent's*
+        # starter (FRE-182), mirroring headless ``play_ai_game``. Both dugout
+        # kinds are covered by ``_starter_hand`` (AI card vs human PlayerInfo).
+        away_hand = self._starter_hand(
+            self.away_team, self._away_ctx, self._away_pitcher_id
+        )
+        home_hand = self._starter_hand(
+            self.home_team, self._home_ctx, self._home_pitcher_id
+        )
         for team, ctx, side in (
             (self.away_team, self._away_ctx, "away"),
             (self.home_team, self._home_ctx, "home"),
         ):
             if ctx is not None:
+                opposing_throws = home_hand if side == "away" else away_hand
                 try:
-                    plan = ai_pregame(team, ctx)
+                    plan = ai_pregame(team, ctx, opposing_throws=opposing_throws)
                 except ValueError:
                     build_lineup(team, self.repo, pitcher_id=None)
                     plan = None
