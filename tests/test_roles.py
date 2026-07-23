@@ -7,8 +7,11 @@ import pytest
 from src.data.models import BattingStats, PitchingStats, PlayerInfo, TeamSeason
 from src.manager.inference import build_role_card
 from src.manager.roles import (
+    POSITION_ABBREVS,
+    SCHEMA_VERSION,
     BatterRoleType,
     PitcherRoleType,
+    RoleCardVersionError,
     TeamRoleCard,
     load_role_card,
     role_card_path,
@@ -105,6 +108,122 @@ def make_synthetic_team(year=1950, team_games=154):
     return team, roster, batting, pitching, appearances
 
 
+def make_platoon_team(year=1950, team_games=154):
+    """A team with a clear L/R platoon sharing right field.
+
+    Seven everyday fielders (C/1B/2B/3B/SS/LF/CF), a DH bat, and two players who
+    share RF with complementary hands: ``rflefty`` (L, 75 starts) and
+    ``rfrighty`` (R, 70 starts) — each part-time, summing to ~one full-time job.
+    """
+    team = TeamSeason(
+        team_id="PLT", year=year, league_id="AL", team_name="Platooners",
+        games=team_games,
+    )
+    roster, batting, pitching, appearances = [], {}, {}, []
+
+    # A minimal, valid pitching staff (mirrors make_synthetic_team's shape).
+    for pid, spec in [
+        ("ace", dict(games=36, games_started=32, ip_outs=840, complete_games=18)),
+        ("two", dict(games=30, games_started=28, ip_outs=720, complete_games=8)),
+        ("three", dict(games=28, games_started=24, ip_outs=600, complete_games=4)),
+        ("fireman", dict(games=45, games_started=0, ip_outs=270, saves=12,
+                         games_finished=35)),
+        ("mopup", dict(games=25, games_started=0, ip_outs=150, games_finished=5)),
+    ]:
+        roster.append(make_player(pid))
+        pitching[pid] = make_pitching_stats(pid, year=year, **spec)
+
+    # Seven everyday fielders.
+    for pid, col, games in [
+        ("catcher", "G_c", 140), ("first", "G_1b", 150), ("second", "G_2b", 145),
+        ("third", "G_3b", 142), ("short", "G_ss", 148), ("leftf", "G_lf", 138),
+        ("centerf", "G_cf", 150),
+    ]:
+        roster.append(make_player(pid))
+        batting[pid] = make_batting_stats(pid, year=year, games=games)
+        appearances.append({"playerID": pid, "G_dh": 0,
+                            **{c: (games if c == col else 0) for c in _POSITION_COLS}})
+
+    # A full-time DH bat.
+    roster.append(make_player("bigdh"))
+    batting["bigdh"] = make_batting_stats("bigdh", year=year, games=140, hits=165,
+                                          home_runs=32, walks=75)
+    appearances.append({"playerID": "bigdh", "G_dh": 140,
+                        **{c: 0 for c in _POSITION_COLS}})
+
+    # The RF platoon: L bat starts vs RHP, R bat starts vs LHP.
+    roster.append(make_player("rflefty", bats="L"))
+    batting["rflefty"] = make_batting_stats("rflefty", year=year, games=80, at_bats=280)
+    appearances.append({"playerID": "rflefty", "G_dh": 0,
+                        **{c: (75 if c == "G_rf" else 0) for c in _POSITION_COLS}})
+
+    roster.append(make_player("rfrighty", bats="R"))
+    batting["rfrighty"] = make_batting_stats("rfrighty", year=year, games=74, at_bats=250)
+    appearances.append({"playerID": "rfrighty", "G_dh": 0,
+                        **{c: (70 if c == "G_rf" else 0) for c in _POSITION_COLS}})
+
+    return team, roster, batting, pitching, appearances
+
+
+class TestPlatoonInference:
+    """Handedness-aware platoon detection + depth-chart metadata (schema v2)."""
+
+    def test_platoon_pair_detected_with_partners_and_sides(self):
+        card = build_role_card(*make_platoon_team())
+        lefty = card.batters["rflefty"]
+        righty = card.batters["rfrighty"]
+
+        assert lefty.role == BatterRoleType.PLATOON
+        assert righty.role == BatterRoleType.PLATOON
+        assert lefty.platoon_partner == "rfrighty"
+        assert righty.platoon_partner == "rflefty"
+        # L bat starts against a right-handed pitcher; R bat against a lefty.
+        assert lefty.platoon_side == "R"
+        assert righty.platoon_side == "L"
+
+    def test_everyday_regulars_are_not_platooned(self):
+        card = build_role_card(*make_platoon_team())
+        for pid in ("catcher", "first", "centerf", "bigdh"):
+            assert card.batters[pid].role == BatterRoleType.REGULAR
+            assert card.batters[pid].platoon_partner is None
+            assert card.batters[pid].platoon_side is None
+
+    def test_depth_chart_ranks_starter_then_partner_then_cover(self):
+        card = build_role_card(*make_platoon_team())
+        # rflefty has more RF starts, so he is the RF starter; his platoon
+        # partner rfrighty is listed second under the shared position.
+        assert card.depth_chart["RF"][:2] == ["rflefty", "rfrighty"]
+        assert card.lineup_positions["rflefty"] == "RF"
+        # Every position with an eligible bat appears in the depth chart.
+        assert set(card.depth_chart) <= set(POSITION_ABBREVS)
+        assert "RF" in card.depth_chart
+
+    def test_switch_hitter_never_platooned(self):
+        # Make the right-side platoon bat a switch hitter: no complementary
+        # pair remains, so neither RF bat is flagged as a platoon.
+        team, roster, batting, pitching, apps = make_platoon_team()
+        roster = [make_player("rfrighty", bats="B") if p.player_id == "rfrighty"
+                  else p for p in roster]
+        card = build_role_card(team, roster, batting, pitching, apps)
+        assert card.batters["rfrighty"].platoon_partner is None
+        assert card.batters["rfrighty"].platoon_side is None
+        assert card.batters["rflefty"].platoon_partner is None
+
+    def test_platoon_detection_is_deterministic(self):
+        a = build_role_card(*make_platoon_team())
+        b = build_role_card(*make_platoon_team())
+        assert a.to_dict() == b.to_dict()
+
+    def test_v2_card_round_trips_platoon_fields(self, tmp_path):
+        card = build_role_card(*make_platoon_team())
+        save_role_card(card, tmp_path)
+        loaded = load_role_card("PLT", 1950, tmp_path)
+        assert loaded.to_dict() == card.to_dict()
+        assert loaded.batters["rflefty"].platoon_partner == "rfrighty"
+        assert loaded.batters["rflefty"].platoon_side == "R"
+        assert loaded.depth_chart["RF"][:2] == ["rflefty", "rfrighty"]
+
+
 class TestInferenceSynthetic:
     """Role inference on a fully synthetic team (no DB required)."""
 
@@ -173,10 +292,28 @@ class TestRoleCardSerialization:
     def test_unsupported_schema_version_rejected(self, tmp_path):
         card = build_role_card(*make_synthetic_team())
         path = save_role_card(card, tmp_path)
-        content = path.read_text().replace('"schema_version": 1', '"schema_version": 99')
+        content = path.read_text().replace(
+            f'"schema_version": {SCHEMA_VERSION}', '"schema_version": 99'
+        )
+        path.write_text(content)
+        with pytest.raises(RoleCardVersionError, match="schema_version"):
+            load_role_card("TST", 1950, tmp_path)
+
+    def test_v1_card_rejected(self, tmp_path):
+        # A prior-schema (v1) card on disk raises the version error — cards are
+        # regenerated, never migrated in place. RoleCardVersionError subclasses
+        # ValueError so existing ``except ValueError`` guards keep working.
+        card = build_role_card(*make_synthetic_team())
+        path = save_role_card(card, tmp_path)
+        content = path.read_text().replace(
+            f'"schema_version": {SCHEMA_VERSION}', '"schema_version": 1'
+        )
         path.write_text(content)
         with pytest.raises(ValueError, match="schema_version"):
             load_role_card("TST", 1950, tmp_path)
+
+    def test_current_schema_version_is_two(self):
+        assert SCHEMA_VERSION == 2
 
     def test_role_card_path_layout(self, tmp_path):
         assert role_card_path("NYA", 1927, tmp_path) == tmp_path / "NYA-1927.json"

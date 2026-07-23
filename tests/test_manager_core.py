@@ -342,3 +342,29 @@ class TestManagerAI:
         first = ai.decide_defense(view)
         for _ in range(5):
             assert ai.decide_defense(view) == first
+
+
+class TestSchemaV2Fields:
+    """Role card schema v2 additive fields (FRE-176).
+
+    The new platoon/depth-chart metadata is *data only* — FRE-178 consumes it.
+    These tests pin the clean defaults and that pregame lineup building is
+    unaffected by the richer cards.
+    """
+
+    def test_batter_card_platoon_fields_default_none(self):
+        c = make_batter_card("x", BatterRoleType.PLATOON, "RF", 0.70)
+        assert c.platoon_partner is None
+        assert c.platoon_side is None
+
+    def test_team_card_depth_chart_defaults_empty(self, card):
+        assert card.depth_chart == {}
+
+    def test_pregame_order_unaffected_by_platoon_metadata(self, card):
+        card.batters["five"].platoon_partner = "benchbat"
+        card.batters["five"].platoon_side = "R"
+        card.depth_chart = {"LF": ["five", "benchbat"]}
+        ai = ManagerAI(card)
+        lineup = ai.build_pregame(available_pitchers=["ace"])
+        assert lineup.batting_order == tuple(pid for pid, _, _ in ORDER_SPECS)
+        assert lineup.positions["five"] == "LF"

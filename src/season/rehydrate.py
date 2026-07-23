@@ -27,7 +27,7 @@ from src.game.manager_adapter import (
 from src.game.persistence import MissingTeamError
 from src.game.team import Team
 from src.manager.inference import build_role_card
-from src.manager.roles import save_role_card
+from src.manager.roles import RoleCardVersionError, save_role_card
 from src.season.state import SeasonState
 
 
@@ -69,12 +69,14 @@ def _ensure_manager(repo, team: Team, roles_dir: Path):
 
     In the normal flow every league team's card was written to ``roles_dir`` at
     season setup and persists on disk, so this loads it directly; a card that
-    has since gone missing is rebuilt from the team's Lahman inputs (the setup
-    behaviour) rather than degrading the dugout to manual control.
+    has since gone missing — or was left on disk by an older schema (cards are
+    regenerated, never migrated) — is rebuilt from the team's Lahman inputs (the
+    setup behaviour) rather than crashing or degrading the dugout to manual
+    control.
     """
     try:
         return load_manager_for_team(team, roles_dir)
-    except FileNotFoundError:
+    except (FileNotFoundError, RoleCardVersionError):
         inputs = _gather_role_card_inputs(repo, team.info.team_id, team.info.year)
         card = build_role_card(*inputs)
         save_role_card(card, roles_dir)

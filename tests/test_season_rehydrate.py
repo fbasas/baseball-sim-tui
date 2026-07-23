@@ -13,6 +13,7 @@ import pytest
 
 import src.season.rehydrate as rehydrate_module
 from src.game.persistence import MissingTeamError
+from src.manager.roles import RoleCardVersionError
 from src.season.rehydrate import rehydrate_season_teams
 from src.season.state import LeagueTeam, SeasonState
 
@@ -103,5 +104,45 @@ def test_missing_role_card_is_rebuilt_in_process(monkeypatch):
     teams, contexts = rehydrate_season_teams(_state(), repo=SimpleNamespace())
 
     # The missing card was built and saved once, then the manager loaded.
+    assert built == ["card:NYA-1927"]
+    assert contexts["NYA-1927"].manager == "mgr:NYA"
+
+
+def test_stale_version_role_card_is_rebuilt_in_process(monkeypatch):
+    """A stale-schema card on disk is regenerated, not fatal (FRE-176).
+
+    After a schema bump, an older card raises ``RoleCardVersionError`` on load;
+    rehydrate must rebuild it in-process exactly as it does for a missing card
+    (cards are regenerated, never migrated in place).
+    """
+    monkeypatch.setattr(
+        rehydrate_module.Team,
+        "load_from_repository",
+        classmethod(lambda cls, repo, team_id, year: _fake_team(team_id, year)),
+    )
+
+    fresh = {"NYA": False}
+    built = []
+
+    def fake_loader(team, roles_dir):
+        if team.info.team_id == "NYA" and not fresh["NYA"]:
+            raise RoleCardVersionError("stale schema_version 1")
+        return f"mgr:{team.info.team_id}"
+
+    monkeypatch.setattr(rehydrate_module, "load_manager_for_team", fake_loader)
+    monkeypatch.setattr(
+        rehydrate_module, "_gather_role_card_inputs",
+        lambda repo, team_id, year: (f"{team_id}-{year}", [], {}, {}, []),
+    )
+    monkeypatch.setattr(rehydrate_module, "build_role_card", lambda *i: f"card:{i[0]}")
+
+    def fake_save(card, roles_dir):
+        built.append(card)
+        fresh["NYA"] = True
+
+    monkeypatch.setattr(rehydrate_module, "save_role_card", fake_save)
+
+    _, contexts = rehydrate_season_teams(_state(), repo=SimpleNamespace())
+
     assert built == ["card:NYA-1927"]
     assert contexts["NYA-1927"].manager == "mgr:NYA"

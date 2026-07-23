@@ -30,6 +30,7 @@ from src.game.manager_adapter import (
     build_roles_hint,
     load_manager_for_team,
 )
+from src.manager.roles import RoleCardVersionError
 from .screens import GameScreen
 from .screens.choice_screen import ChoiceScreen
 from .screens.pitcher_select_screen import PitcherSelectScreen
@@ -703,14 +704,17 @@ class BaseballSimApp(App):
         """Load a role card for an AI-managed side.
 
         The role artifact is built by an explicit offline pass; if it's
-        missing, tell the user how to create it and fall back to manual
-        control for that side rather than blocking the game.
+        missing — or was left on disk by an older schema (cards are
+        regenerated, never migrated, so a stale ``RoleCardVersionError`` is
+        treated exactly like a missing card) — tell the user how to (re)create
+        it and fall back to manual control for that side rather than crashing.
+        Unlike season rehydrate, this path has no in-process rebuild.
         """
         if not want_ai:
             return None
         try:
             manager = load_manager_for_team(team)
-        except FileNotFoundError:
+        except (FileNotFoundError, RoleCardVersionError):
             self.notify(
                 f"No role card for {team.info.year} {team.info.team_name} — "
                 f"run: {build_roles_hint(team)}\n"
