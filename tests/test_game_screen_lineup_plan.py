@@ -112,7 +112,7 @@ def _swap_leadoff_plan(team) -> LineupPlan:
 
 def _make_screen(away, home, away_plan=None, home_plan=None):
     """Minimal stand-in exposing exactly what _build_lineups reads/writes."""
-    return SimpleNamespace(
+    screen = SimpleNamespace(
         away_team=away,
         home_team=home,
         repo=object(),  # unused on the plan path; monkeypatched on the other
@@ -123,6 +123,13 @@ def _make_screen(away, home, away_plan=None, home_plan=None):
         _away_plan=away_plan,
         _home_plan=home_plan,
     )
+    # FRE-182: _build_lineups resolves each side's starter hand up front. Both
+    # sides here are human (ctx=None) so the resolved hand is unused (no AI side
+    # platoons), but the call must resolve — bind the real method.
+    screen._starter_hand = (
+        lambda team, ctx, pid: GameScreen._starter_hand(screen, team, ctx, pid)
+    )
+    return screen
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +255,9 @@ def test_build_lineups_plan_on_real_team_and_survives_replay():
             _away_ctx=None, _home_ctx=None,
             _away_pitcher_id=away_pid, _home_pitcher_id=home_pid,
             _away_plan=plan, _home_plan=None,
+        )
+        screen._starter_hand = (
+            lambda team, ctx, pid: GameScreen._starter_hand(screen, team, ctx, pid)
         )
 
         GameScreen._build_lineups(screen)

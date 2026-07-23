@@ -185,3 +185,147 @@ def test_same_hand_gives_a_stable_platoon_choice():
     second = _play(away_team, away_card, home_team, card_rhp, 2)
     assert "lf_lhb" in first.away_batter_starts
     assert "lf_lhb" in second.away_batter_starts
+
+
+# --- Interactive TUI path: GameScreen._build_lineups (FRE-182) ---------------
+#
+# The headless proof above runs through play_ai_game. FRE-182 wires the *same*
+# platoon behavior into the interactive user game: an AI-managed opponent must
+# platoon against the human's chosen starter (whose hand comes from PlayerInfo,
+# not a role card) and against an AI opponent's starter alike. These exercise
+# GameScreen._build_lineups as an unbound function against a mocked ``self``
+# (the SimpleNamespace pattern from test_manager_tui_integration.py) — no
+# Textual App context, no Lahman database.
+
+from types import SimpleNamespace
+
+from src.data.models import PlayerInfo
+from src.tui.screens.game_screen import GameScreen
+
+
+class _FakeRepo:
+    """Minimal repo for the human-side build: empty Appearances (the heuristic
+    builder falls back to at-bats ordering) and an optional hand lookup used
+    only when the roster carries no PlayerInfo for the starter."""
+
+    def __init__(self, hands=None):
+        self._hands = hands or {}
+
+    def get_appearances(self, team_id, year):
+        return []
+
+    def get_player_info(self, pid):
+        hand = self._hands.get(pid)
+        return PlayerInfo(pid, "F", "L", hand or "R", hand) if hand else None
+
+
+def _human_home_team():
+    """The home fixture as a *human* dugout: roster populated so the heuristic
+    build_lineup can field a nine and _starter_hand can read the starter's hand
+    from PlayerInfo. Its two candidate starters carry opposite throwing hands."""
+    home_team, _card_rhp, _card_lhp = _home_team_and_cards()
+    home_team.roster = [
+        PlayerInfo(pid, "B", "Bat", "R", "R") for pid in home_team.batting_stats
+    ] + [
+        PlayerInfo("home_rhp", "R", "HP", "R", "R"),
+        PlayerInfo("home_lhp", "L", "HP", "L", "L"),
+    ]
+    return home_team
+
+
+def _screen_mock(away_team, away_card, home_team, home_ctx, home_pid, repo):
+    """A GameScreen ``self`` mock: AI away side (with the LF platoon), the given
+    home dugout (human when home_ctx is None), and _starter_hand bound live."""
+    mock = SimpleNamespace(
+        repo=repo,
+        away_team=away_team,
+        home_team=home_team,
+        _away_ctx=TeamManagerContext(manager=ManagerAI(away_card)),
+        _home_ctx=home_ctx,
+        _away_plan=None,
+        _home_plan=None,
+        _away_pitcher_id=None,
+        _home_pitcher_id=home_pid,
+        _away_batter_starts=[],
+        _home_batter_starts=[],
+    )
+    mock._starter_hand = (
+        lambda team, ctx, pid: GameScreen._starter_hand(mock, team, ctx, pid)
+    )
+    return mock
+
+
+def _away_starters(mock):
+    GameScreen._build_lineups(mock)
+    return [s.player_id for s in mock.away_team.lineup.slots]
+
+
+def test_interactive_ai_opponent_platoons_by_human_starter_hand():
+    """The AI opponent's starting nine shifts by the human starter's hand: the
+    L bat starts when the human throws R, the R bat when the human throws L."""
+    away_team, away_card = _away_team_and_card()
+    home_team = _human_home_team()
+    repo = _FakeRepo()
+
+    # Human throws R (picks home_rhp) -> AI away starts the left-handed bat.
+    vs_r = _screen_mock(away_team, away_card, home_team, None, "home_rhp", repo)
+    starters_vs_r = _away_starters(vs_r)
+    assert "lf_lhb" in starters_vs_r and "lf_rhb" not in starters_vs_r
+
+    # Human throws L (picks home_lhp) -> AI away starts the right-handed bat.
+    vs_l = _screen_mock(away_team, away_card, home_team, None, "home_lhp", repo)
+    starters_vs_l = _away_starters(vs_l)
+    assert "lf_rhb" in starters_vs_l and "lf_lhb" not in starters_vs_l
+
+
+def test_interactive_unknown_human_hand_falls_back_to_historical():
+    """An unknown/missing human starter hand yields no platoon edge: the AI
+    opponent fields its historical LF (lf_lhb), never flipping to lf_rhb."""
+    away_team, away_card = _away_team_and_card()
+    home_team = _human_home_team()
+    # A starter with no recorded hand anywhere (not on the roster, not in repo).
+    home_team.roster.append(PlayerInfo("home_unknown", "U", "HP", "R", ""))
+    home_team.pitching_stats["home_unknown"] = _pit("home_unknown")
+    repo = _FakeRepo()  # get_player_info -> None for home_unknown
+
+    mock = _screen_mock(away_team, away_card, home_team, None, "home_unknown", repo)
+    assert mock._starter_hand(home_team, None, "home_unknown") is None
+    starters = _away_starters(mock)
+    assert "lf_lhb" in starters and "lf_rhb" not in starters
+
+
+def test_interactive_human_hand_from_repo_when_roster_lacks_it():
+    """When the roster has no PlayerInfo for the human starter, the hand comes
+    from the repo fallback — still driving the platoon."""
+    away_team, away_card = _away_team_and_card()
+    home_team = _human_home_team()
+    # Drop the roster PlayerInfo for home_lhp; the repo supplies its L hand.
+    home_team.roster = [p for p in home_team.roster if p.player_id != "home_lhp"]
+    repo = _FakeRepo(hands={"home_lhp": "L"})
+
+    mock = _screen_mock(away_team, away_card, home_team, None, "home_lhp", repo)
+    assert mock._starter_hand(home_team, None, "home_lhp") == "L"
+    starters = _away_starters(mock)
+    assert "lf_rhb" in starters and "lf_lhb" not in starters
+
+
+def test_interactive_ai_vs_ai_opponent_platoons_by_card_hand():
+    """Series games share _build_lineups: when the opponent is AI, its starter's
+    hand comes from the role card (resolve_ai_starter) and still drives the
+    platoon — no human/PlayerInfo involved."""
+    away_team, away_card = _away_team_and_card()
+    home_team, card_rhp, card_lhp = _home_team_and_cards()
+
+    vs_r = _screen_mock(
+        away_team, away_card, home_team,
+        TeamManagerContext(manager=ManagerAI(card_rhp)), None, None,
+    )
+    starters_vs_r = _away_starters(vs_r)
+    assert "lf_lhb" in starters_vs_r and "lf_rhb" not in starters_vs_r
+
+    vs_l = _screen_mock(
+        away_team, away_card, home_team,
+        TeamManagerContext(manager=ManagerAI(card_lhp)), None, None,
+    )
+    starters_vs_l = _away_starters(vs_l)
+    assert "lf_rhb" in starters_vs_l and "lf_lhb" not in starters_vs_l
