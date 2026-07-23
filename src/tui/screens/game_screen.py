@@ -45,6 +45,15 @@ from ..widgets import BoxscoreWidget, LineupCard, PlayByPlayLog, SituationWidget
 from .substitution_menu import SubstitutionMenu
 
 
+def _lineup_starts(team: Optional[Team]) -> List[str]:
+    """The player ids of a team's current lineup slots (its starters at build
+    time), or ``[]`` when the team or its lineup isn't set — the season
+    completion payload reports these for batter-rest bookkeeping (FRE-177)."""
+    if team is None or team.lineup is None:
+        return []
+    return [slot.player_id for slot in team.lineup.slots]
+
+
 class GameScreen(Screen):
     """Main game dashboard screen composing all widgets.
 
@@ -281,6 +290,12 @@ class GameScreen(Screen):
         self._home_ctx = home_ctx
         self._away_plan = away_plan
         self._home_plan = home_plan
+        # The 9 starting batter ids per side, captured once the lineups are
+        # built (or restored) — reported in the season completion payload so
+        # SeasonController records batter rest exactly like a simmed game
+        # (FRE-177). Empty until lineups exist.
+        self._away_batter_starts: List[str] = []
+        self._home_batter_starts: List[str] = []
         self._on_game_complete = on_game_complete
         self._restore = restore
         self.engine: Optional[GameEngine] = None
@@ -502,6 +517,10 @@ class GameScreen(Screen):
         accumulators.
         """
         self._apply_restored_state(self._restore)
+        # Best-effort starters for a resumed game: the restored lineup is the
+        # current one (post any pre-save subs), the closest available proxy.
+        self._away_batter_starts = _lineup_starts(self.away_team)
+        self._home_batter_starts = _lineup_starts(self.home_team)
 
         self._set_panel_titles()
         self._update_lineup_cards()
@@ -611,6 +630,10 @@ class GameScreen(Screen):
                     build_lineup(team, self.repo, pitcher_id=(
                         self._away_pitcher_id if side == "away" else self._home_pitcher_id
                     ))
+        # Capture the 9 fielded starters per side (before any in-game sub) so a
+        # season game reports them for batter-rest bookkeeping (FRE-177).
+        self._away_batter_starts = _lineup_starts(self.away_team)
+        self._home_batter_starts = _lineup_starts(self.home_team)
 
     def _log_pregame_decisions(self, log: PlayByPlayLog) -> None:
         """Surface AI pregame choices (starter/lineup) in the play log."""
@@ -1217,6 +1240,10 @@ class GameScreen(Screen):
                 "home_score": state.home_score,
                 "away_workloads": away_workloads,
                 "home_workloads": home_workloads,
+                # Season mode (FRE-177) records batter rest from the starters;
+                # series mode ignores these keys, unchanged.
+                "away_batter_starts": self._away_batter_starts,
+                "home_batter_starts": self._home_batter_starts,
                 # Season mode (FRE-96) ingests the game's stat lines from this
                 # accumulator; series mode ignores the extra key, unchanged.
                 "box_score": self._box,

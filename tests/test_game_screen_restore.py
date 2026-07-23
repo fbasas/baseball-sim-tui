@@ -162,7 +162,9 @@ def test_finalize_restore_injects_state_without_rebuild_or_reset():
     def _boom(*args, **kwargs):
         raise AssertionError("restore must not rebuild lineups / reset tracking")
 
-    ms = SimpleNamespace(_restore=snap)
+    # No teams set: the restore-path batter-starts capture (FRE-177) reads
+    # self.away_team/home_team and must no-op cleanly when they're absent.
+    ms = SimpleNamespace(_restore=snap, away_team=None, home_team=None)
     # These would clobber restored state — binding them to raise proves the
     # restore path never reaches them.
     ms._build_lineups = _boom

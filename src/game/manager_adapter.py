@@ -17,6 +17,7 @@ from src.game.positions import DesignatedHitter, Position
 from src.game.state import GameState, InningHalf
 from src.game.substitutions import SubstitutionManager
 from src.game.team import Team, create_lineup
+from src.manager.batter_rest import BatterUsageLedger
 from src.manager.manager import ManagerAI
 from src.manager.rest import RestLedger
 from src.manager.roles import TeamRoleCard, load_role_card
@@ -62,12 +63,15 @@ def load_manager_for_team(
 class TeamManagerContext:
     """Everything the TUI needs to run the AI for one side of a game.
 
-    day is the series day index (0 for a single game); ledger carries rest
-    state across series games (fresh for a single game).
+    day is the series/season day index (0 for a single game); ledger carries
+    pitcher rest state and batter_ledger carries position-player usage/rest
+    state across games (both fresh for a single game). The season controller
+    swaps in its own per-team ledgers before each game.
     """
 
     manager: ManagerAI
     ledger: RestLedger = field(default_factory=RestLedger)
+    batter_ledger: BatterUsageLedger = field(default_factory=BatterUsageLedger)
     day: int = 0
 
     @property
@@ -84,10 +88,19 @@ def _slot_abbrev(slot_position) -> str:
 def ai_pregame(team: Team, ctx: TeamManagerContext) -> SetLineup:
     """Have the manager set the team's starter and lineup; returns the plan.
 
-    Availability comes from the rest ledger (everyone, for a fresh ledger).
-    Batters or pitchers on the role card that this Team load doesn't actually
-    have stats for are treated as unavailable so create_lineup can't fail on
-    a data mismatch.
+    Pitcher availability comes from the rest ledger (everyone, for a fresh
+    ledger). Batters or pitchers on the role card that this Team load doesn't
+    actually have stats for are treated as unavailable so create_lineup can't
+    fail on a data mismatch.
+
+    Batter rest (FRE-177): REGULARs the ``batter_ledger`` flags as due for a
+    day off are sat so the backups start — but only when ``build_pregame`` can
+    still field a legal nine without them. The ledger only flags fatigue;
+    feasibility is confirmed here by trying the build with each sit added
+    (cheap and side-effect free), which runs the real ``_fill_holes`` path, so
+    a kept sit can never leave the lineup short. Sits are considered in the
+    ledger's deterministic order and the season sim carries the ledger across
+    days, so lineups vary and regulars accrue genuine rest days.
     """
     rested = ctx.ledger.available_pitchers(ctx.card, ctx.day)
     available_pitchers = [pid for pid in rested if pid in team.pitching_stats]
@@ -102,6 +115,19 @@ def ai_pregame(team: Team, ctx: TeamManagerContext) -> SetLineup:
         available_pitchers=available_pitchers,
         unavailable_batters=unavailable_batters,
     )
+    for pid in ctx.batter_ledger.resting_batters(ctx.card, ctx.day):
+        if pid in unavailable_batters:
+            continue
+        trial = unavailable_batters + [pid]
+        try:
+            trial_plan = ctx.manager.build_pregame(
+                available_pitchers=available_pitchers,
+                unavailable_batters=trial,
+            )
+        except ValueError:
+            continue  # no eligible replacement — keep the regular in today
+        unavailable_batters = trial
+        plan = trial_plan
 
     positions = {
         pid: _ABBREV_TO_POSITION[abbrev] for pid, abbrev in plan.positions.items()

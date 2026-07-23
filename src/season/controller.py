@@ -27,6 +27,7 @@ from src.game.autoplay import play_ai_game
 from src.game.manager_adapter import TeamManagerContext
 from src.game.persistence import BoxScore
 from src.game.team import Team
+from src.manager.batter_rest import BatterUsageLedger
 from src.manager.rest import RestLedger
 from src.season.schedule import ScheduledGame, SeasonDay
 from src.season.state import SeasonGameRecord, SeasonState
@@ -43,7 +44,11 @@ class SeasonController:
             user's — their games can be simmed and ``play_ai_game`` needs a
             context for both dugouts). Held, never serialized.
         stats: season stat accumulator; a fresh one if omitted.
-        ledgers: rest ledger per team key; a fresh one per team if omitted.
+        ledgers: pitcher rest ledger per team key; a fresh one per team if
+            omitted.
+        batter_ledgers: batter usage/rest ledger per team key; a fresh one per
+            team if omitted. Parallel to ``ledgers`` — regulars rest and
+            backups start across the schedule (FRE-177).
     """
 
     def __init__(
@@ -53,6 +58,7 @@ class SeasonController:
         contexts: Dict[str, TeamManagerContext],
         stats: Optional[SeasonStats] = None,
         ledgers: Optional[Dict[str, RestLedger]] = None,
+        batter_ledgers: Optional[Dict[str, BatterUsageLedger]] = None,
     ) -> None:
         self.state = state
         self.teams = teams
@@ -62,6 +68,11 @@ class SeasonController:
             ledgers
             if ledgers is not None
             else {key: RestLedger() for key in state.team_keys}
+        )
+        self.batter_ledgers = (
+            batter_ledgers
+            if batter_ledgers is not None
+            else {key: BatterUsageLedger() for key in state.team_keys}
         )
 
     # --- Simple views -------------------------------------------------------
@@ -122,20 +133,25 @@ class SeasonController:
         away_workloads: Dict[str, int],
         home_workloads: Dict[str, int],
         box_score: BoxScore,
+        away_batter_starts: List[str],
+        home_batter_starts: List[str],
     ) -> SeasonGameRecord:
         """The one bookkeeping path both sim and user games flow through.
 
-        Records pitcher usage into both teams' rest ledgers (by the game's
-        day), folds the box score into the season stats, then appends the
-        result. ``sim_game`` and ``record_user_game`` differ only in where the
-        numbers come from, so they produce byte-identical bookkeeping for the
-        same game data.
+        Records pitcher usage into both teams' rest ledgers and starting
+        batters into both teams' batter usage ledgers (by the game's day),
+        folds the box score into the season stats, then appends the result.
+        ``sim_game`` and ``record_user_game`` differ only in where the numbers
+        come from, so they produce byte-identical bookkeeping for the same game
+        data.
         """
         day = scheduled_game.day
         away_key = scheduled_game.away_key
         home_key = scheduled_game.home_key
         self.ledgers[away_key].record(day, away_workloads)
         self.ledgers[home_key].record(day, home_workloads)
+        self.batter_ledgers[away_key].record(day, away_batter_starts)
+        self.batter_ledgers[home_key].record(day, home_batter_starts)
         self.stats.ingest(box_score, home_key=home_key, away_key=away_key)
         record = SeasonGameRecord(
             game_id=scheduled_game.game_id,
@@ -166,8 +182,10 @@ class SeasonController:
         away_ctx = self.contexts[away_key]
         home_ctx = self.contexts[home_key]
         away_ctx.ledger = self.ledgers[away_key]
+        away_ctx.batter_ledger = self.batter_ledgers[away_key]
         away_ctx.day = day
         home_ctx.ledger = self.ledgers[home_key]
+        home_ctx.batter_ledger = self.batter_ledgers[home_key]
         home_ctx.day = day
 
         result = play_ai_game(
@@ -184,6 +202,8 @@ class SeasonController:
             away_workloads=result.away_workloads,
             home_workloads=result.home_workloads,
             box_score=result.box_score,
+            away_batter_starts=result.away_batter_starts,
+            home_batter_starts=result.home_batter_starts,
         )
 
     def record_user_game(
@@ -193,10 +213,12 @@ class SeasonController:
 
         ``payload`` is the end-of-game dict a season ``GameScreen`` reports:
         ``away_score`` / ``home_score`` / ``away_workloads`` / ``home_workloads``
-        plus the game's ``box_score`` (a :class:`BoxScore`). Bookkeeping is
-        identical to :meth:`sim_game`; the game's innings are taken from the
-        box's linescore, which the engine keeps equal to a simmed game's
-        ``innings``.
+        / ``away_batter_starts`` / ``home_batter_starts`` plus the game's
+        ``box_score`` (a :class:`BoxScore`). Bookkeeping is identical to
+        :meth:`sim_game`; the game's innings are taken from the box's linescore,
+        which the engine keeps equal to a simmed game's ``innings``. The batter
+        starts default empty (no rest recorded) for an older payload lacking the
+        keys, so nothing breaks.
         """
         box_score = payload["box_score"]
         return self._record(
@@ -207,6 +229,8 @@ class SeasonController:
             away_workloads=payload["away_workloads"],
             home_workloads=payload["home_workloads"],
             box_score=box_score,
+            away_batter_starts=payload.get("away_batter_starts", []),
+            home_batter_starts=payload.get("home_batter_starts", []),
         )
 
     # --- Day / multi-day simulation -----------------------------------------

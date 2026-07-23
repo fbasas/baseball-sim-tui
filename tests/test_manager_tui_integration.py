@@ -181,6 +181,50 @@ class TestAiPregame:
         plan = ai_pregame(team, ctx)
         assert plan.starting_pitcher == "p2"
 
+    def _run_streak(self, ctx, regular_id: str, order, streak_days: int = 9):
+        """Record a start history where every regular starts days 0..N-1 but only
+        ``regular_id`` also starts the latest day, so he alone carries a live
+        start streak long enough to be due for rest (start_share 0.9 → a
+        threshold of 10 consecutive starts). Sets ``ctx.day`` to the next day."""
+        for d in range(streak_days):
+            ctx.batter_ledger.record(d, order)
+        ctx.batter_ledger.record(streak_days, [regular_id])
+        ctx.day = streak_days + 1
+
+    def test_rested_regular_with_replacement_is_sat_and_backup_starts(self):
+        """A REGULAR whose streak hit the rest threshold and who has an eligible,
+        stats-present bench replacement sits; the backup takes the start."""
+        team = make_team()
+        ctx = make_ctx()
+        order = [f"b{i}" for i in range(9)]
+        self._run_streak(ctx, "b0", order)  # b0 is CF; b_bench1 covers CF
+        ai_pregame(team, ctx)
+        starters = [s.player_id for s in team.lineup.slots]
+        assert "b0" not in starters          # regular got a rest day
+        assert "b_bench1" in starters        # backup started in his place
+        assert len(starters) == 9            # never break the nine
+
+    def test_rested_regular_without_replacement_stays_in(self):
+        """A REGULAR due for rest but with no eligible replacement is kept in the
+        lineup — feasibility never breaks the nine (the SS has no bench cover)."""
+        team = make_team()
+        ctx = make_ctx()
+        order = [f"b{i}" for i in range(9)]
+        self._run_streak(ctx, "b1", order)  # b1 is SS; no bench is SS-eligible
+        ai_pregame(team, ctx)
+        starters = [s.player_id for s in team.lineup.slots]
+        assert "b1" in starters              # irreplaceable → cannot be rested
+        assert starters == order             # lineup unchanged
+
+    def test_fresh_batter_ledger_leaves_lineup_unchanged(self):
+        """With no recorded starts nobody is due for rest, so the historical
+        batting order is fielded verbatim (the default/season-start case)."""
+        team = make_team()
+        ctx = make_ctx()
+        ai_pregame(team, ctx)
+        starters = [s.player_id for s in team.lineup.slots]
+        assert starters == [f"b{i}" for i in range(9)]
+
 
 # --- Adapter: build_view ----------------------------------------------------
 
@@ -387,6 +431,10 @@ class TestSeriesEndGameRouting:
             # completion payload now forwards it (season ingests it, series
             # ignores it).
             _box=BoxScore(),
+            # Starting batters per side (FRE-177): the completion payload
+            # forwards them so season mode records batter rest; series ignores.
+            _away_batter_starts=["a1", "a2"],
+            _home_batter_starts=["h1", "h2"],
             _pitching_lines={
                 "p1": {"outs": 21, "H": 6, "R": 3, "ER": 3, "BB": 2, "K": 5},
                 "opp": {"outs": 24, "H": 9, "R": 5, "ER": 5, "BB": 1, "K": 3},
@@ -414,6 +462,9 @@ class TestSeriesEndGameRouting:
         mock, app = self._mock_with_result(lambda result: captured.update(result))
         GameScreen._handle_end_game_choice(mock, "new")
         assert captured["box_score"] is mock._box
+        # Season batter-rest bookkeeping (FRE-177) rides the same payload.
+        assert captured["away_batter_starts"] == ["a1", "a2"]
+        assert captured["home_batter_starts"] == ["h1", "h2"]
 
     def test_series_mode_quit_exits(self):
         mock, app = self._mock_with_result(lambda result: None)
