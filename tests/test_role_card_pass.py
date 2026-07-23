@@ -25,7 +25,7 @@ import threading
 from types import SimpleNamespace
 
 import src.tui.role_card_pass as role_card_pass_module
-from src.manager.roles import TeamRoleCard, save_role_card
+from src.manager.roles import SCHEMA_VERSION, TeamRoleCard, save_role_card
 from src.season.state import LeagueTeam
 from src.tui.role_card_pass import RoleCardPass
 
@@ -124,6 +124,15 @@ def _write_card(roles_dir, team_id, year):
     )
 
 
+def _write_stale_card(roles_dir, team_id, year):
+    """Write a card, then downgrade its schema_version on disk (a stale v1)."""
+    path = save_role_card(TeamRoleCard(team_id, year, {}, {}, [], {}), roles_dir)
+    text = path.read_text().replace(
+        f'"schema_version": {SCHEMA_VERSION}', '"schema_version": 1'
+    )
+    path.write_text(text)
+
+
 _TEAMS = [LeagueTeam("AAA", 1927, "1927 AAA"), LeagueTeam("BBB", 1975, "1975 BBB")]
 
 
@@ -167,6 +176,30 @@ def test_missing_card_built_then_succeeds(monkeypatch, tmp_path):
     assert (tmp_path / "BBB-1975.json").exists()
     assert captured == {"success": True}
     assert app.worker_kwargs.get("thread") is True
+
+
+def test_stale_version_card_is_rebuilt(monkeypatch, tmp_path):
+    """A stale-schema card on disk counts as missing and is regenerated.
+
+    Cards are regenerated, never migrated in place (FRE-176). Setup must
+    overwrite a prior-schema card rather than leave it to crash the later
+    in-game load.
+    """
+    _write_card(tmp_path, "AAA", 1927)          # current schema -> usable
+    _write_stale_card(tmp_path, "BBB", 1975)    # stale v1 -> must rebuild
+    built = []
+
+    def fake_build(team_season, *a, **k):
+        built.append((team_season.team_id, team_season.year))
+        return TeamRoleCard(team_season.team_id, team_season.year, {}, {}, [], {})
+
+    monkeypatch.setattr(role_card_pass_module, "build_role_card", fake_build)
+    app = FakeApp()
+    captured = _run(app, _repo(), tmp_path)
+
+    # Only the stale team was rebuilt; the current-schema card was left alone.
+    assert built == [("BBB", 1975)]
+    assert captured == {"success": True}
 
 
 def test_unbuildable_team_blocks_named(monkeypatch, tmp_path):

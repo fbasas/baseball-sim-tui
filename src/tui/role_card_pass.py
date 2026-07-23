@@ -27,7 +27,7 @@ from typing import Callable, List, Optional, Tuple
 
 from src.game.manager_adapter import DEFAULT_ROLES_DIR
 from src.manager.inference import build_role_card
-from src.manager.roles import role_card_path, save_role_card
+from src.manager.roles import load_role_card, role_card_path, save_role_card
 from src.season.state import LeagueTeam
 
 
@@ -103,12 +103,26 @@ class RoleCardPass:
     # --- Missing-card discovery --------------------------------------------
 
     def _missing_teams(self, teams: List[LeagueTeam]) -> List[LeagueTeam]:
-        """League teams with no role card on disk (need building)."""
-        return [
-            team
-            for team in teams
-            if not role_card_path(team.team_id, team.year, self._roles_dir).exists()
-        ]
+        """League teams whose role card must be (re)built.
+
+        A card is "missing" if absent, or present but unusable — a stale schema
+        version or otherwise unreadable artifact. Cards are regenerated, never
+        migrated in place, so a stale card is rebuilt (overwritten) here rather
+        than left to crash the later in-game load.
+        """
+        return [team for team in teams if not self._has_usable_card(team)]
+
+    def _has_usable_card(self, team: LeagueTeam) -> bool:
+        """True only if a current-schema role card is already on disk."""
+        path = role_card_path(team.team_id, team.year, self._roles_dir)
+        if not path.exists():
+            return False
+        try:
+            load_role_card(team.team_id, team.year, self._roles_dir)
+        except (ValueError, OSError):
+            # Stale schema (RoleCardVersionError) or corrupt JSON: rebuild it.
+            return False
+        return True
 
     # --- Gather (main thread) ----------------------------------------------
 

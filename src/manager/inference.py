@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 
 from src.data.models import BattingStats, PitchingStats, PlayerInfo, TeamSeason
 from src.manager.roles import (
+    POSITION_ABBREVS,
     BatterRoleCard,
     BatterRoleType,
     PitcherRoleCard,
@@ -307,7 +308,105 @@ def _infer_batters(
                 "bats": info.bats if info else "R",
             },
         )
+    _detect_platoons(cards)
     return cards
+
+
+# --- Handedness-aware platoon detection ------------------------------------
+
+# Start-share bands (fraction of team games) for a true platoon pair.
+_PLATOON_MIN_SHARE = 0.20      # each member is at least a part-time contributor
+_PLATOON_MAX_SHARE = 0.65      # ... but below the REGULAR (full-time) threshold
+_PLATOON_PAIR_MIN_SUM = 0.60   # combined, they cover roughly one full-time job
+_PLATOON_PAIR_MAX_SUM = 1.20   # ... and aren't two near-regulars stacked
+
+
+def _opposing_hand(bats: str) -> Optional[str]:
+    """Opposing-pitcher throwing hand a batter has the platoon edge against."""
+    if bats == "L":
+        return "R"
+    if bats == "R":
+        return "L"
+    return None  # switch hitters (B): no fixed platoon side
+
+
+def _detect_platoons(cards: Dict[str, BatterRoleCard]) -> None:
+    """Mark true platoon pairs in place: partner, side, and the PLATOON role.
+
+    A pair is two part-time players who share a primary position, bat with
+    complementary hands (switch hitters ``B`` are neutral and never platooned),
+    and whose start shares sum to roughly one full-time job. Deterministic:
+    candidates are grouped by position and, within a position, the highest-share
+    left-handed bat is paired with the highest-share right-handed bat (ties by
+    player_id). A batter joins at most one platoon pair.
+    """
+    def bats_of(card: BatterRoleCard) -> str:
+        return str(card.metrics.get("bats", "R"))
+
+    candidates = [
+        c for c in cards.values()
+        if _PLATOON_MIN_SHARE <= c.start_share < _PLATOON_MAX_SHARE
+        and bats_of(c) in ("L", "R")
+    ]
+    by_position: Dict[str, List[BatterRoleCard]] = {}
+    for c in candidates:
+        by_position.setdefault(c.primary_position, []).append(c)
+
+    for abbrev in sorted(by_position):
+        group = by_position[abbrev]
+        lefties = sorted(
+            [c for c in group if bats_of(c) == "L"],
+            key=lambda c: (-c.start_share, c.player_id),
+        )
+        righties = sorted(
+            [c for c in group if bats_of(c) == "R"],
+            key=lambda c: (-c.start_share, c.player_id),
+        )
+        for lc, rc in zip(lefties, righties):
+            total = lc.start_share + rc.start_share
+            if not (_PLATOON_PAIR_MIN_SUM <= total <= _PLATOON_PAIR_MAX_SUM):
+                continue
+            lc.platoon_partner, rc.platoon_partner = rc.player_id, lc.player_id
+            lc.platoon_side = _opposing_hand("L")   # lefty bat starts vs RHP
+            rc.platoon_side = _opposing_hand("R")   # righty bat starts vs LHP
+            lc.role = BatterRoleType.PLATOON
+            rc.role = BatterRoleType.PLATOON
+
+
+def _build_depth_chart(
+    batters: Dict[str, BatterRoleCard],
+    lineup_positions: Dict[str, str],
+) -> Dict[str, List[str]]:
+    """Rank player_ids per position: starter, platoon partner, then bench cover.
+
+    The lineup starter for a position leads; a platoon partner (if eligible
+    there) is next; remaining eligible bats follow by usage then bat quality.
+    Deterministic (ties by player_id). Consumed by the lineup selector (FRE-B).
+    """
+    starter_by_pos: Dict[str, str] = {
+        abbrev: pid for pid, abbrev in lineup_positions.items()
+    }
+
+    def cover_key(pid: str):
+        b = batters[pid]
+        return (-b.start_share, -float(b.metrics.get("ops", 0.0)), pid)
+
+    depth: Dict[str, List[str]] = {}
+    for abbrev in POSITION_ABBREVS:
+        eligible = [pid for pid, b in batters.items() if abbrev in b.eligible_positions]
+        ranked: List[str] = []
+        starter = starter_by_pos.get(abbrev)
+        if starter is not None:
+            ranked.append(starter)
+            partner = batters[starter].platoon_partner
+            if partner and partner in batters and abbrev in batters[partner].eligible_positions:
+                ranked.append(partner)
+        for pid in sorted(eligible, key=cover_key):
+            if pid not in ranked:
+                ranked.append(pid)
+        if ranked:
+            depth[abbrev] = ranked
+    return depth
 
 
 _SPEED_POSITIONS = {"CF", "SS", "2B"}
@@ -425,6 +524,7 @@ def build_role_card(
     batting_order, lineup_positions = _recommend_batting_order(
         batters, batting_stats, app_by_id
     )
+    depth_chart = _build_depth_chart(batters, lineup_positions)
 
     return TeamRoleCard(
         team_id=team_season.team_id,
@@ -433,5 +533,6 @@ def build_role_card(
         batters=batters,
         batting_order=batting_order,
         lineup_positions=lineup_positions,
+        depth_chart=depth_chart,
         notes=notes,
     )
