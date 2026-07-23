@@ -85,7 +85,35 @@ def _slot_abbrev(slot_position) -> str:
     return "DH"
 
 
-def ai_pregame(team: Team, ctx: TeamManagerContext) -> SetLineup:
+def _available_starters(team: Team, ctx: TeamManagerContext) -> list:
+    """Pitcher ids this side may start today: rested arms that have stats.
+
+    Falls back to the whole staff when nobody is rested (a deep-series edge
+    case) so a starter can always be resolved.
+    """
+    rested = ctx.ledger.available_pitchers(ctx.card, ctx.day)
+    available_pitchers = [pid for pid in rested if pid in team.pitching_stats]
+    if not available_pitchers:
+        available_pitchers = sorted(team.pitching_stats.keys())
+    return available_pitchers
+
+
+def resolve_ai_starter(team: Team, ctx: TeamManagerContext) -> str:
+    """The starting pitcher the manager will pick for this team today.
+
+    Resolved *before* either lineup is built so the opponent's lineup can be
+    made platoon-aware against this starter's throwing hand (FRE-178).
+    Deterministic and side-effect free; ``ai_pregame`` re-selects the same
+    starter when it builds the plan.
+    """
+    return ctx.manager.select_starter(_available_starters(team, ctx)).player_id
+
+
+def ai_pregame(
+    team: Team,
+    ctx: TeamManagerContext,
+    opposing_throws: Optional[str] = None,
+) -> SetLineup:
     """Have the manager set the team's starter and lineup; returns the plan.
 
     Pitcher availability comes from the rest ledger (everyone, for a fresh
@@ -101,12 +129,13 @@ def ai_pregame(team: Team, ctx: TeamManagerContext) -> SetLineup:
     a kept sit can never leave the lineup short. Sits are considered in the
     ledger's deterministic order and the season sim carries the ledger across
     days, so lineups vary and regulars accrue genuine rest days.
+
+    Platoon (FRE-178): ``opposing_throws`` — the opposing starter's hand — is
+    passed through to ``build_pregame`` (including the rest feasibility trials,
+    so the feasibility check matches the lineup actually built), which starts
+    the platoon-advantaged, available bat at each platooned position.
     """
-    rested = ctx.ledger.available_pitchers(ctx.card, ctx.day)
-    available_pitchers = [pid for pid in rested if pid in team.pitching_stats]
-    if not available_pitchers:
-        # Nobody is rested (deep series edge case): field whoever exists.
-        available_pitchers = sorted(team.pitching_stats.keys())
+    available_pitchers = _available_starters(team, ctx)
 
     unavailable_batters = [
         pid for pid in ctx.card.batters if pid not in team.batting_stats
@@ -114,6 +143,7 @@ def ai_pregame(team: Team, ctx: TeamManagerContext) -> SetLineup:
     plan: SetLineup = ctx.manager.build_pregame(
         available_pitchers=available_pitchers,
         unavailable_batters=unavailable_batters,
+        opposing_throws=opposing_throws,
     )
     for pid in ctx.batter_ledger.resting_batters(ctx.card, ctx.day):
         if pid in unavailable_batters:
@@ -123,6 +153,7 @@ def ai_pregame(team: Team, ctx: TeamManagerContext) -> SetLineup:
             trial_plan = ctx.manager.build_pregame(
                 available_pitchers=available_pitchers,
                 unavailable_batters=trial,
+                opposing_throws=opposing_throws,
             )
         except ValueError:
             continue  # no eligible replacement — keep the regular in today

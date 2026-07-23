@@ -368,3 +368,88 @@ class TestSchemaV2Fields:
         lineup = ai.build_pregame(available_pitchers=["ace"])
         assert lineup.batting_order == tuple(pid for pid, _, _ in ORDER_SPECS)
         assert lineup.positions["five"] == "LF"
+
+
+def _platoon_card():
+    """A card whose LF is a real L/R platoon pair (FRE-178).
+
+    ``lf_lhb`` (bats L, starts vs RHP) is the historical LF in ``batting_order``;
+    ``lf_rhb`` (bats R, starts vs LHP) is its bench partner, eligible at LF and
+    listed under it in the depth chart. Eight other regulars fill the rest of
+    the nine so the lineup is legal without any platoon choice.
+    """
+    pitchers = {
+        "ace": make_pitcher_card("ace", PitcherRoleType.STARTER, slot=1),
+    }
+    other = [
+        ("lead", "CF"), ("second", "SS"), ("third", "1B"), ("cleanup", "RF"),
+        ("six", "3B"), ("seven", "2B"), ("eight", "C"), ("weakbat", "DH"),
+    ]
+    batters = {pid: make_batter_card(pid, BatterRoleType.REGULAR, pos, 0.75)
+               for pid, pos in other}
+
+    def platoon_bat(pid, bats, side, partner):
+        return BatterRoleCard(
+            player_id=pid, role=BatterRoleType.PLATOON, primary_position="LF",
+            eligible_positions=["LF"], start_share=0.35,
+            platoon_partner=partner, platoon_side=side,
+            metrics={"ops": 0.760, "obp": 0.330, "slg": 0.430, "avg": 0.270,
+                     "ab": 250, "games": 90, "bats": bats},
+        )
+
+    batters["lf_lhb"] = platoon_bat("lf_lhb", "L", "R", "lf_rhb")
+    batters["lf_rhb"] = platoon_bat("lf_rhb", "R", "L", "lf_lhb")
+
+    order = [pid for pid, _ in other[:4]] + ["lf_lhb"] + [pid for pid, _ in other[4:]]
+    positions = {pid: pos for pid, pos in other}
+    positions["lf_lhb"] = "LF"
+    return TeamRoleCard(
+        team_id="PLT", year=2000, pitchers=pitchers, batters=batters,
+        batting_order=order, lineup_positions=positions,
+        depth_chart={"LF": ["lf_lhb", "lf_rhb"]},
+    )
+
+
+class TestPlatoonLineupSelection:
+    """FRE-178 headline: PLATOON roles are exercised — the platoon-advantaged
+    bat starts against the opposing starter's hand, both directions."""
+
+    def test_left_bat_starts_vs_rhp(self):
+        ai = ManagerAI(_platoon_card())
+        lineup = ai.build_pregame(available_pitchers=["ace"], opposing_throws="R")
+        assert "lf_lhb" in lineup.batting_order  # L bat starts vs RHP
+        assert "lf_rhb" not in lineup.batting_order
+        assert lineup.positions["lf_lhb"] == "LF"
+        assert len(lineup.batting_order) == 9
+
+    def test_right_bat_starts_vs_lhp(self):
+        ai = ManagerAI(_platoon_card())
+        lineup = ai.build_pregame(available_pitchers=["ace"], opposing_throws="L")
+        assert "lf_rhb" in lineup.batting_order  # R bat starts vs LHP
+        assert "lf_lhb" not in lineup.batting_order
+        assert lineup.positions["lf_rhb"] == "LF"
+        assert len(lineup.batting_order) == 9
+
+    def test_swaps_hold_the_batting_slot(self):
+        """The partner inherits the incumbent's batting-order slot, not a new one."""
+        ai = ManagerAI(_platoon_card())
+        vs_rhp = ai.build_pregame(available_pitchers=["ace"], opposing_throws="R")
+        vs_lhp = ai.build_pregame(available_pitchers=["ace"], opposing_throws="L")
+        slot = vs_rhp.batting_order.index("lf_lhb")
+        assert vs_lhp.batting_order[slot] == "lf_rhb"
+
+    def test_no_opposing_hand_keeps_historical_starter(self):
+        ai = ManagerAI(_platoon_card())
+        lineup = ai.build_pregame(available_pitchers=["ace"])
+        assert "lf_lhb" in lineup.batting_order
+        assert "lf_rhb" not in lineup.batting_order
+
+    def test_advantaged_partner_unavailable_falls_back(self):
+        """If the favored partner can't play (rest/data-missing), keep the incumbent."""
+        ai = ManagerAI(_platoon_card())
+        lineup = ai.build_pregame(
+            available_pitchers=["ace"], unavailable_batters=["lf_rhb"],
+            opposing_throws="L",
+        )
+        assert "lf_lhb" in lineup.batting_order  # partner out → historical bat stays
+        assert len(lineup.batting_order) == 9

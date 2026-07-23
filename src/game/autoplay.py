@@ -15,7 +15,12 @@ from src.game.engine import (
     resolve_pitcher_stats,
     transition_half_inning,
 )
-from src.game.manager_adapter import TeamManagerContext, ai_pregame, build_view
+from src.game.manager_adapter import (
+    TeamManagerContext,
+    ai_pregame,
+    build_view,
+    resolve_ai_starter,
+)
 from src.game.persistence import BoxScore
 from src.game.positions import Position
 from src.game.state import GameState, InningHalf
@@ -64,6 +69,17 @@ class AutoGameResult:
     box_score: Optional[BoxScore] = None
 
 
+def _starter_throws(ctx: TeamManagerContext, pitcher_id: str) -> Optional[str]:
+    """The starting pitcher's throwing hand (``"L"``/``"R"``) from its card.
+
+    Returns None when the hand isn't recorded, so the opposing lineup falls
+    back to its historical order rather than guessing a platoon edge.
+    """
+    card = ctx.card.pitchers.get(pitcher_id)
+    throws = card.metrics.get("throws") if card else None
+    return throws if throws in ("L", "R") else None
+
+
 def play_ai_game(
     away_team: Team,
     home_team: Team,
@@ -80,8 +96,17 @@ def play_ai_game(
     if rng_seed is not None:
         engine.reset_rng(rng_seed)
 
-    away_plan = ai_pregame(away_team, away_ctx)
-    home_plan = ai_pregame(home_team, home_ctx)
+    # Resolve both starters before either lineup is built, so each side's
+    # lineup can be made platoon-aware against the *opponent's* starting hand
+    # (FRE-178). Starter selection is deterministic, so ai_pregame re-picks the
+    # same arm when it builds the plan.
+    away_starter = resolve_ai_starter(away_team, away_ctx)
+    home_starter = resolve_ai_starter(home_team, home_ctx)
+    away_throws = _starter_throws(away_ctx, away_starter)
+    home_throws = _starter_throws(home_ctx, home_starter)
+
+    away_plan = ai_pregame(away_team, away_ctx, opposing_throws=home_throws)
+    home_plan = ai_pregame(home_team, home_ctx, opposing_throws=away_throws)
 
     state = GameState(
         away_pitcher_id=away_plan.starting_pitcher,
