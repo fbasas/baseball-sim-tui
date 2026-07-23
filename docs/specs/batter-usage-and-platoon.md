@@ -205,13 +205,58 @@ matchup:
   or the advantaged bat is unavailable (rest/data-missing). Deterministic tie-breaks;
   always emits a legal 9 with positions.
 - Interactive path: `app._play_user_game` knows the user's chosen starter, so pass its
-  hand as the AI opponent's `opposing_throws` (small addition; keep it if it fits the
-  size budget, otherwise note it as a follow-up in the PR).
+  hand as the AI opponent's `opposing_throws`. **Deferred out of B** per the size
+  budget — carried by tranche **D** below (spun off as FRE-181).
 
 Observable DoD (the headline for Fred — PLATOON roles finally exercised): on a fixture
 with a known L/R platoon, the **L bat starts vs a RHP and the R bat starts vs a LHP**;
 across a simmed season the team's lineup shifts with the opposing starter's hand; the
-season still completes and lineups are demonstrably not constant.
+season still completes and lineups are demonstrably not constant. (This DoD is proven
+**headless** by B; the interactive user-game path is D below.)
+
+### Convergence — D (interactive user-game AI opponent)
+
+**D — wire the interactive AI opponent to platoon by the human's starter hand.**
+*Depends on B (FRE-178).* B implemented the platoon path **headless only**
+(`play_ai_game` resolves both starters up front via `resolve_ai_starter`, reads each
+`throws` via `_starter_throws`, and passes each opponent's hand to `ai_pregame(...,
+opposing_throws=...)`). The **interactive** TUI game does not: in
+`src/tui/screens/game_screen.py::_build_lineups`, each AI-managed side calls
+`ai_pregame(team, ctx)` with **no** opposing hand, so the AI opponent never platoons
+against the human's chosen starter. Wire it through.
+
+- In `_build_lineups`, for an **AI-managed side** (its `ctx` is not `None`), resolve
+  the **opposing** starter's throwing hand and pass it as
+  `ai_pregame(team, ctx, opposing_throws=<hand>)`.
+- **The wrinkle — the human side has no role card.** In a user game exactly one side
+  is human (`ctx is None`); its chosen starter id is already known on the screen as
+  `self._away_pitcher_id` / `self._home_pitcher_id` (set in `after_pick` as `pid or
+  default_pid`, so it is always a real pitcher id by build time — never `None`).
+  Because the human dugout carries no `TeamManagerContext`/role card, its hand must
+  come from **`PlayerInfo`**, not a card: resolve `throws` (`"L"`/`"R"`) via
+  `team.get_player(pid).throws` (or `repo.get_player_info(pid).throws`) on the
+  opposing team — both already available to the screen (`self.repo`, the two `Team`
+  objects). Treat anything other than `"L"`/`"R"` (missing/unknown) as `None`, so the
+  AI falls back to its historical order rather than guessing an edge — mirroring
+  `_starter_throws`.
+- **AI-vs-AI opposing side** (the shared `_build_lineups` also runs series games where
+  the opposing side is itself AI): resolve that side's starter deterministically up
+  front — `resolve_ai_starter(opp_team, opp_ctx)` — and read its hand from the card
+  metrics (`_starter_throws`), exactly like headless, so ordering within the build
+  loop can't leave the hand unknown. A single helper that returns a starter's hand
+  from *either* a ctx-card or `PlayerInfo` keeps both cases in one place.
+- No change to `ai_pregame` / `build_pregame` / the selection logic — this is a pure
+  call-site wiring: the interactive path finally supplies the hand B already knows how
+  to consume.
+
+Observable DoD (D): with a known L/R platoon fixture, building the interactive
+lineups (the `GameScreen` AI-hook methods are unit-testable as unbound functions
+against a mock `self` — see `tests/test_manager_tui_integration.py`, reusing the
+platoon fixture from `tests/test_platoon_lineup_integration.py`) yields an AI
+opponent starting nine that **differs by the human starter's hand**: the platooned
+position starts the L bat when the human throws R and the R bat when the human throws
+L, and falls back to the historical order when the hand is unknown. No web, no live
+Lahman dependency in the test.
 
 ## Open questions
 
@@ -230,3 +275,4 @@ The Retrosheet split question raised in the original checkpoint is deferred by d
 | FRE-177 | Rest-driven batter rotation in season sims (wire the ledger, live + persistence) — *Track 1 › A2* | FRE-175 | high |
 | FRE-176 | Handedness-aware platoon inference + depth-chart metadata (schema v2) — *Track 2 › C* | — | high |
 | FRE-178 | Platoon-aware lineup selection (consume opposing-starter hand + depth chart) — *Convergence › B* | FRE-177, FRE-176 | high |
+| FRE-182 | Wire interactive user-game AI opponent to platoon by the human's starter hand — *Convergence › D* | FRE-178 | — |
